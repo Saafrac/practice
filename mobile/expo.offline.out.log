@@ -1,0 +1,8 @@
+env: load .env
+env: export EXPO_PUBLIC_API_BASE_URL
+Networking has been disabled
+Starting project at C:\Users\a.dulat\PhpstormProjects\practice\mobile
+Starting Metro Bundler
+warning: Bundler cache is empty, rebuilding (this may take a minute)
+Waiting on http://localhost:8083
+Logs for your project will appear below.

@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Adaptive English Test AI",
+    "slug": "adaptive-english-test-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0B1020"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.practice.adaptiveenglishtestai"
+    },
+    "extra": {
+      "apiBaseUrl": "http://10.0.2.2:8000"
+    },
+    "plugins": [
+      "expo-asset"
+    ]
+  }
+}

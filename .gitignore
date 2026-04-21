@@ -1,0 +1,15 @@
+node_modules/
+.expo/
+.expo-shared/
+dist/
+build/
+coverage/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+backend/.env
+mobile/.env
+backend/alembic/versions/

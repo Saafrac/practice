@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: adaptive-english-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: adaptive_english
+      POSTGRES_USER: adaptive_user
+      POSTGRES_PASSWORD: adaptive_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adaptive_user -d adaptive_english"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+    container_name: adaptive-english-backend
+    restart: unless-stopped
+    environment:
+      APP_NAME: Adaptive English Test AI API
+      APP_ENV: docker
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8000
+      CORS_ALLOW_ORIGINS: http://localhost:8080,http://127.0.0.1:8080
+      JWT_SECRET_KEY: docker_dev_secret_change_me
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 1440
+      DATABASE_URL: postgresql+asyncpg://adaptive_user:adaptive_password@postgres:5432/adaptive_english
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build:
+      context: ./mobile
+      args:
+        EXPO_PUBLIC_API_BASE_URL: /api
+    container_name: adaptive-english-web
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  postgres_data:
