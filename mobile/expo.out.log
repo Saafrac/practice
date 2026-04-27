@@ -1,8 +1,0 @@
-
-> adaptive-english-test-ai-mobile@1.0.0 start
-> expo start --port 8083
-
-env: load .env
-env: export EXPO_PUBLIC_API_BASE_URL
-Starting project at C:\Users\a.dulat\PhpstormProjects\practice\mobile
-Starting Metro Bundler
