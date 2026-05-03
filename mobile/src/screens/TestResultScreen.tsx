@@ -11,7 +11,7 @@ import { SkeletonBlock } from "../components/SkeletonBlock";
 import { StatBox } from "../components/StatBox";
 import { RootStackParamList } from "../navigation/types";
 import { useAuthStore } from "../store/authStore";
-import { AttemptResultResponse, ErrorProfileItem } from "../types/testing";
+import { AttemptResultResponse, ErrorProfileItem, RecommendationCardItem } from "../types/testing";
 import { colors } from "../theme/colors";
 
 type ResultRoute = RouteProp<RootStackParamList, "TestResult">;
@@ -118,6 +118,45 @@ function findWeakestArea(errorProfile: ErrorProfileDisplayItem[]) {
   }, errorProfile[0]);
 }
 
+function buildRecommendationCards(result: AttemptResultResponse): RecommendationCardItem[] {
+  if (result.recommendation_cards && result.recommendation_cards.length > 0) {
+    return result.recommendation_cards;
+  }
+
+  if (result.recommendations.length === 0) {
+    return [
+      {
+        category: "mixed_practice",
+        priority: "Low",
+        estimated_time: "10 min",
+        reason: "No critical weak topic was detected in this attempt.",
+        suggested_activity: "Keep regular mixed practice to maintain your current level.",
+      },
+    ];
+  }
+
+  return result.recommendations.map((recommendation, index) => {
+    const category = result.weak_topics[index] ?? "mixed_practice";
+    return {
+      category,
+      priority: index === 0 ? "High" : "Medium",
+      estimated_time: index === 0 ? "25 min" : "15 min",
+      reason: `Rule-based analysis selected ${formatTopic(category)} from the current weak-topic profile.`,
+      suggested_activity: recommendation,
+    };
+  });
+}
+
+function getPriorityStyle(priority: string) {
+  if (priority.toLowerCase() === "high") {
+    return styles.priorityHigh;
+  }
+  if (priority.toLowerCase() === "medium") {
+    return styles.priorityMedium;
+  }
+  return styles.priorityLow;
+}
+
 export function TestResultScreen() {
   const route = useRoute<ResultRoute>();
   const navigation = useNavigation<Navigation>();
@@ -192,6 +231,7 @@ export function TestResultScreen() {
   const levelBand = getLevelBand(result.score_percent);
   const errorProfile = buildErrorProfile(result.error_profile);
   const weakestArea = findWeakestArea(errorProfile);
+  const recommendationCards = buildRecommendationCards(result);
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
@@ -263,14 +303,37 @@ export function TestResultScreen() {
         )}
       </AppCard>
 
-      <AppCard title="Recommendations" delay={150}>
-        {result.recommendations.length > 0 ? (
-          result.recommendations.map((recommendation) => (
-            <Text key={recommendation} style={styles.summaryLine}>- {recommendation}</Text>
-          ))
-        ) : (
-          <Text style={styles.summaryText}>Keep regular mixed practice to maintain your current level.</Text>
-        )}
+      <AppCard
+        title="AI Recommendations"
+        subtitle="Personalized next steps generated from the error profile."
+        delay={150}
+      >
+        <Text style={styles.defenseLine}>
+          Based on the error profile, the system forms personalized recommendations for further learning.
+        </Text>
+        <View style={styles.recommendationList}>
+          {recommendationCards.map((recommendation, index) => (
+            <View key={`${recommendation.category}-${index}`} style={styles.recommendationItem}>
+              <View style={styles.recommendationHeader}>
+                <Text style={styles.recommendationCategory}>{formatTopic(recommendation.category)}</Text>
+                <View style={[styles.priorityBadge, getPriorityStyle(recommendation.priority)]}>
+                  <Text style={styles.priorityText}>{recommendation.priority}</Text>
+                </View>
+              </View>
+              <Text style={styles.recommendationReason}>{recommendation.reason}</Text>
+              <View style={styles.activityRow}>
+                <View style={styles.activityBlock}>
+                  <Text style={styles.activityLabel}>Suggested activity</Text>
+                  <Text style={styles.activityText}>{recommendation.suggested_activity}</Text>
+                </View>
+                <View style={styles.timePill}>
+                  <Text style={styles.timeLabel}>Time</Text>
+                  <Text style={styles.timeValue}>{recommendation.estimated_time}</Text>
+                </View>
+              </View>
+            </View>
+          ))}
+        </View>
         <PrimaryButton title="Back to dashboard" onPress={() => navigation.navigate("RoleTabs")} />
       </AppCard>
     </ScrollView>
@@ -409,5 +472,108 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     fontSize: 14,
     lineHeight: 20,
+  },
+  defenseLine: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  recommendationList: {
+    gap: 14,
+  },
+  recommendationItem: {
+    borderColor: colors.border,
+    borderLeftColor: colors.primary,
+    borderLeftWidth: 4,
+    borderTopWidth: 1,
+    gap: 10,
+    paddingTop: 12,
+    paddingLeft: 12,
+  },
+  recommendationHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  recommendationCategory: {
+    color: colors.text,
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "800",
+    minWidth: 140,
+  },
+  priorityBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  priorityHigh: {
+    backgroundColor: "#FDECEC",
+  },
+  priorityMedium: {
+    backgroundColor: "#FFF4D8",
+  },
+  priorityLow: {
+    backgroundColor: "#EAF8EF",
+  },
+  priorityText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  recommendationReason: {
+    color: colors.mutedText,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+  },
+  activityRow: {
+    alignItems: "stretch",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  activityBlock: {
+    flex: 1,
+    gap: 4,
+    minWidth: 180,
+  },
+  activityLabel: {
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  activityText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  timePill: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "#F7F9FF",
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1,
+    minWidth: 78,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  timeLabel: {
+    color: colors.mutedText,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  timeValue: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "900",
   },
 });

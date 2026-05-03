@@ -14,6 +14,7 @@ from app.schemas.testing import (
     NextQuestionPayload,
     NextQuestionResponse,
     QuestionOptionPublic,
+    RecommendationCardItem,
     SubmitAnswerRequest,
     SubmitAnswerResponse,
     TestAttemptStartResponse,
@@ -188,6 +189,16 @@ async def attempt_result(attempt_id: int, current_user: User = Depends(get_curre
         insight=feedback.insight,
         weak_topics=feedback.weak_topics,
         recommendations=feedback.recommendations,
+        recommendation_cards=[
+            RecommendationCardItem(
+                category=item.category,
+                reason=item.reason,
+                suggested_activity=item.suggested_activity,
+                estimated_time=item.estimated_time,
+                priority=item.priority,
+            )
+            for item in feedback.recommendation_cards
+        ],
         error_profile=[
             ErrorProfileItem(
                 topic=item.topic,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -36,10 +36,20 @@ class AttemptResultSnapshot:
 
 
 @dataclass(frozen=True)
+class RecommendationCardSnapshot:
+    category: str
+    reason: str
+    suggested_activity: str
+    estimated_time: str
+    priority: str
+
+
+@dataclass(frozen=True)
 class AttemptFeedbackSnapshot:
     weak_topics: list[str]
     recommendations: list[str]
     insight: str
+    recommendation_cards: list[RecommendationCardSnapshot] = field(default_factory=list)
 
 
 def classify_level(score_percent: Decimal) -> str:
@@ -63,6 +73,56 @@ def build_topic_recommendation(topic: str) -> str:
         "word_order": "Train sentence-building patterns with adverb and inversion exercises.",
     }
     return templates.get(topic, f"Strengthen '{topic}' with targeted exercises and short daily practice.")
+
+
+def build_ai_recommendation_card(
+    topic: str,
+    recommendation_text: str,
+    total_questions: int,
+    wrong_answers: int,
+    score_percent: Decimal,
+) -> RecommendationCardSnapshot:
+    activity_templates = {
+        "grammar": "Complete a short grammar drill, then rewrite 5 incorrect sentences with explanations.",
+        "vocabulary": "Create a 12-word flashcard set and review it twice using spaced repetition.",
+        "reading": "Read one A2/B1 text and write a one-sentence summary for each paragraph.",
+        "articles": "Solve focused a/an/the drills and explain the article choice after each answer.",
+        "tenses": "Compare two tense timelines and complete contrast exercises for Past and Present Perfect.",
+        "prepositions": "Practice 10 common collocations, then use each one in a sentence.",
+        "word_order": "Build 8 sentences from shuffled words and check subject-verb-object order.",
+    }
+
+    accuracy = Decimal("100.00")
+    if total_questions > 0:
+        accuracy = (Decimal(total_questions - wrong_answers) / Decimal(total_questions) * Decimal("100")).quantize(
+            Decimal("0.01")
+        )
+
+    if wrong_answers >= 2 or accuracy < Decimal("55") or score_percent < Decimal("55"):
+        priority = "High"
+        estimated_time = "25 min"
+    elif wrong_answers == 1 or accuracy < Decimal("75"):
+        priority = "Medium"
+        estimated_time = "15 min"
+    else:
+        priority = "Low"
+        estimated_time = "10 min"
+
+    if wrong_answers > 0:
+        reason = (
+            f"{wrong_answers} mistake(s) in {topic} lowered accuracy to {accuracy}%. "
+            "The module prioritizes this area from the error profile."
+        )
+    else:
+        reason = "No critical gap was detected, so the module recommends light maintenance practice."
+
+    return RecommendationCardSnapshot(
+        category=topic,
+        reason=reason,
+        suggested_activity=activity_templates.get(topic, recommendation_text),
+        estimated_time=estimated_time,
+        priority=priority,
+    )
 
 
 def build_insight(score_percent: Decimal, weak_topics: list[str]) -> str:
@@ -346,13 +406,44 @@ async def rebuild_error_profile_and_recommendations(
         ][:1]
 
     recommendations: list[str] = []
+    recommendation_cards: list[RecommendationCardSnapshot] = []
     for topic in weak_topics[:3]:
         recommendation_text = build_topic_recommendation(topic)
+        bucket = topic_stats.get(topic, {"total": 0, "wrong": 0})
         recommendations.append(recommendation_text)
+        recommendation_cards.append(
+            build_ai_recommendation_card(
+                topic=topic,
+                recommendation_text=recommendation_text,
+                total_questions=bucket["total"],
+                wrong_answers=bucket["wrong"],
+                score_percent=score_percent,
+            )
+        )
         session.add(
             Recommendation(
                 attempt_id=attempt_id,
                 category=topic,
+                text=recommendation_text,
+            )
+        )
+
+    if not recommendations:
+        recommendation_text = "Keep regular mixed practice to maintain your current level."
+        recommendations.append(recommendation_text)
+        recommendation_cards.append(
+            build_ai_recommendation_card(
+                topic="mixed_practice",
+                recommendation_text=recommendation_text,
+                total_questions=len(answers),
+                wrong_answers=0,
+                score_percent=score_percent,
+            )
+        )
+        session.add(
+            Recommendation(
+                attempt_id=attempt_id,
+                category="mixed_practice",
                 text=recommendation_text,
             )
         )
@@ -363,6 +454,7 @@ async def rebuild_error_profile_and_recommendations(
         weak_topics=weak_topics,
         recommendations=recommendations,
         insight=insight,
+        recommendation_cards=recommendation_cards,
     )
 
 
@@ -374,19 +466,43 @@ async def get_attempt_feedback(session: AsyncSession, attempt_id: int, score_per
             .order_by(ErrorProfile.wrong_answers.desc(), ErrorProfile.topic.asc())
         )
     ).scalars().all()
-    recommendations = (
+    recommendation_rows = (
         await session.execute(
-            select(Recommendation.text)
+            select(Recommendation.category, Recommendation.text)
             .where(Recommendation.attempt_id == attempt_id)
             .order_by(Recommendation.id.asc())
         )
-    ).scalars().all()
+    ).all()
 
-    if not weak_topics and not recommendations:
+    if not recommendation_rows:
         return await rebuild_error_profile_and_recommendations(session, attempt_id, score_percent)
+
+    error_profile_rows = (
+        await session.execute(
+            select(ErrorProfile)
+            .where(ErrorProfile.attempt_id == attempt_id)
+            .order_by(ErrorProfile.wrong_answers.desc(), ErrorProfile.topic.asc())
+        )
+    ).scalars().all()
+    stats_by_topic = {
+        item.topic: {"total": item.total_questions, "wrong": item.wrong_answers}
+        for item in error_profile_rows
+    }
+    recommendations = [text for _, text in recommendation_rows]
+    recommendation_cards = [
+        build_ai_recommendation_card(
+            topic=category,
+            recommendation_text=text,
+            total_questions=stats_by_topic.get(category, {"total": 0, "wrong": 0})["total"],
+            wrong_answers=stats_by_topic.get(category, {"total": 0, "wrong": 0})["wrong"],
+            score_percent=score_percent,
+        )
+        for category, text in recommendation_rows
+    ]
 
     return AttemptFeedbackSnapshot(
         weak_topics=list(weak_topics),
-        recommendations=list(recommendations),
+        recommendations=recommendations,
         insight=build_insight(score_percent, list(weak_topics)),
+        recommendation_cards=recommendation_cards,
     )

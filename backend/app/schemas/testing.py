@@ -63,6 +63,14 @@ class ErrorProfileItem(BaseModel):
     accuracy_percent: float
 
 
+class RecommendationCardItem(BaseModel):
+    category: str
+    reason: str
+    suggested_activity: str
+    estimated_time: str
+    priority: str
+
+
 class AttemptResultResponse(BaseModel):
     attempt_id: int
     started_at: datetime
@@ -75,5 +83,6 @@ class AttemptResultResponse(BaseModel):
     insight: str
     weak_topics: list[str]
     recommendations: list[str]
+    recommendation_cards: list[RecommendationCardItem] = Field(default_factory=list)
     error_profile: list[ErrorProfileItem] = Field(default_factory=list)
 

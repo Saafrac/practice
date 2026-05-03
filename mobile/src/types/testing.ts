@@ -54,6 +54,14 @@ export type ErrorProfileItem = {
   accuracy_percent: number;
 };
 
+export type RecommendationCardItem = {
+  category: string;
+  reason: string;
+  suggested_activity: string;
+  estimated_time: string;
+  priority: "High" | "Medium" | "Low" | string;
+};
+
 export type AttemptResultResponse = {
   attempt_id: number;
   started_at: string;
@@ -66,5 +74,6 @@ export type AttemptResultResponse = {
   insight: string;
   weak_topics: string[];
   recommendations: string[];
+  recommendation_cards?: RecommendationCardItem[];
   error_profile?: ErrorProfileItem[];
 };
