@@ -47,3 +47,11 @@ class TeacherGroupAnalyticsResponse(BaseModel):
     total_attempts: int
     average_score: float
     weak_topics: list[TeacherWeakTopicItem]
+
+
+class TeacherStudentReportResponse(BaseModel):
+    student_id: int
+    student_name: str
+    latest_attempt: TeacherStudentResultItem | None
+    weak_topics: list[TeacherWeakTopicItem]
+    recommendations: list[str]

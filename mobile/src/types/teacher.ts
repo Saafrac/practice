@@ -39,3 +39,11 @@ export type TeacherGroupAnalyticsResponse = {
   average_score: number;
   weak_topics: TeacherWeakTopicItem[];
 };
+
+export type TeacherStudentReportResponse = {
+  student_id: number;
+  student_name: string;
+  latest_attempt: TeacherStudentResultItem | null;
+  weak_topics: TeacherWeakTopicItem[];
+  recommendations: string[];
+};

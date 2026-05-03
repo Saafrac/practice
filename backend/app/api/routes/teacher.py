@@ -13,6 +13,7 @@ from app.db.session import get_db_session
 from app.schemas.teacher import (
     TeacherGroupAnalyticsResponse,
     TeacherStudentItem,
+    TeacherStudentReportResponse,
     TeacherStudentResultItem,
     TeacherStudentResultsResponse,
     TeacherStudentsResponse,
@@ -81,6 +82,77 @@ async def students(
         )
 
     return TeacherStudentsResponse(students=response_items)
+
+
+@router.get("/students/{student_id}/report", response_model=TeacherStudentReportResponse)
+async def student_report(
+    student_id: int,
+    current_user: User = Depends(require_roles(UserRole.TEACHER, UserRole.ADMIN)),
+) -> TeacherStudentReportResponse:
+    async with get_db_session() as session:
+        student_ids = await _resolve_student_ids(session, current_user)
+        if student_id not in student_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Student is not in your groups.",
+            )
+
+        student = await session.scalar(select(User).where(User.id == student_id, User.role == UserRole.STUDENT))
+        if student is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found.")
+
+        latest_attempt = await session.scalar(
+            select(TestAttempt)
+            .where(TestAttempt.user_id == student_id, TestAttempt.finished_at.is_not(None))
+            .options(
+                selectinload(TestAttempt.test),
+                selectinload(TestAttempt.error_profiles),
+                selectinload(TestAttempt.recommendations),
+            )
+            .order_by(TestAttempt.finished_at.desc())
+            .limit(1)
+        )
+
+    if latest_attempt is None or latest_attempt.finished_at is None:
+        return TeacherStudentReportResponse(
+            student_id=student.id,
+            student_name=student.full_name,
+            latest_attempt=None,
+            weak_topics=[],
+            recommendations=[],
+        )
+
+    weak_topics = [
+        TeacherWeakTopicItem(
+            topic=item.topic,
+            total_questions=item.total_questions,
+            wrong_answers=item.wrong_answers,
+            accuracy_percent=float(item.accuracy_percent or Decimal("0")),
+        )
+        for item in latest_attempt.error_profiles
+        if item.wrong_answers > 0
+    ]
+    weak_topics.sort(key=lambda item: (-item.wrong_answers, item.topic))
+
+    recommendations = [
+        recommendation.text
+        for recommendation in sorted(latest_attempt.recommendations, key=lambda item: (item.category, item.id))
+    ]
+
+    return TeacherStudentReportResponse(
+        student_id=student.id,
+        student_name=student.full_name,
+        latest_attempt=TeacherStudentResultItem(
+            attempt_id=latest_attempt.id,
+            test_type=latest_attempt.test.type,
+            finished_at=latest_attempt.finished_at,
+            score_percent=float(latest_attempt.score_percent or Decimal("0")),
+            level_result=latest_attempt.level_result or "Beginner",
+            theta_final=float(latest_attempt.theta_final or Decimal("0")),
+        ),
+        weak_topics=weak_topics[:5],
+        recommendations=recommendations,
+    )
 
 
 @router.get("/students/{student_id}/results", response_model=TeacherStudentResultsResponse)

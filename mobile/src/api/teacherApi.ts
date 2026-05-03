@@ -1,6 +1,7 @@
 ﻿import { env } from "../config/env";
 import {
   TeacherGroupAnalyticsResponse,
+  TeacherStudentReportResponse,
   TeacherStudentResultsResponse,
   TeacherStudentsResponse,
 } from "../types/teacher";
@@ -40,6 +41,15 @@ export async function fetchTeacherStudentResults(
   studentId: number,
 ): Promise<TeacherStudentResultsResponse> {
   return authedRequest<TeacherStudentResultsResponse>(token, `/teacher/students/${studentId}/results`, {
+    method: "GET",
+  });
+}
+
+export async function fetchTeacherStudentReport(
+  token: string,
+  studentId: number,
+): Promise<TeacherStudentReportResponse> {
+  return authedRequest<TeacherStudentReportResponse>(token, `/teacher/students/${studentId}/report`, {
     method: "GET",
   });
 }

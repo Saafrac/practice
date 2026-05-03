@@ -3,18 +3,26 @@ import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { fetchTeacherStudentResults } from "../api/teacherApi";
+import { fetchTeacherStudentReport, fetchTeacherStudentResults } from "../api/teacherApi";
 import { AppCard } from "../components/AppCard";
 import { EmptyState } from "../components/EmptyState";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { SkeletonBlock } from "../components/SkeletonBlock";
 import { RootStackParamList } from "../navigation/types";
 import { useAuthStore } from "../store/authStore";
-import { TeacherStudentResultsResponse } from "../types/teacher";
+import { TeacherStudentReportResponse, TeacherStudentResultsResponse } from "../types/teacher";
 import { colors } from "../theme/colors";
 
 type ScreenRoute = RouteProp<RootStackParamList, "TeacherStudentResults">;
 type Navigation = NativeStackNavigationProp<RootStackParamList>;
+
+function formatPercent(value: number) {
+  return `${Math.round(value)}%`;
+}
+
+function formatTheta(value: number) {
+  return value.toFixed(2);
+}
 
 export function TeacherStudentResultsScreen() {
   const route = useRoute<ScreenRoute>();
@@ -22,6 +30,7 @@ export function TeacherStudentResultsScreen() {
   const token = useAuthStore((state) => state.token);
 
   const [payload, setPayload] = useState<TeacherStudentResultsResponse | null>(null);
+  const [reportPayload, setReportPayload] = useState<TeacherStudentReportResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,8 +43,12 @@ export function TeacherStudentResultsScreen() {
 
     setError(null);
     try {
-      const response = await fetchTeacherStudentResults(token, route.params.studentId);
-      setPayload(response);
+      const [resultsResponse, reportResponse] = await Promise.all([
+        fetchTeacherStudentResults(token, route.params.studentId),
+        fetchTeacherStudentReport(token, route.params.studentId),
+      ]);
+      setPayload(resultsResponse);
+      setReportPayload(reportResponse);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not load student results.");
     } finally {
@@ -47,6 +60,10 @@ export function TeacherStudentResultsScreen() {
     void loadResults();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params.studentId, token]);
+
+  const latestAttempt = reportPayload?.latest_attempt ?? payload?.results[0] ?? null;
+  const reportWeakTopics = reportPayload?.weak_topics ?? [];
+  const reportRecommendations = reportPayload?.recommendations ?? [];
 
   if (isLoading) {
     return (
@@ -86,6 +103,71 @@ export function TeacherStudentResultsScreen() {
         <Text style={styles.title}>{payload.student_name}</Text>
         <Text style={styles.subtitle}>Finished attempts and progression for this student.</Text>
       </View>
+
+      <AppCard title="Report preview" subtitle="Individual teaching summary based on the latest finished attempt" delay={60}>
+        {latestAttempt ? (
+          <View style={styles.reportWrap}>
+            <View style={styles.reportHeader}>
+              <View style={styles.reportIdentity}>
+                <Text style={styles.reportLabel}>Student</Text>
+                <Text style={styles.reportName}>{payload.student_name}</Text>
+                <Text style={styles.reportDate}>
+                  Latest attempt: {new Date(latestAttempt.finished_at).toLocaleString()}
+                </Text>
+              </View>
+              <View style={styles.reportBadge}>
+                <Text style={styles.reportBadgeLabel}>Level</Text>
+                <Text style={styles.reportBadgeValue}>{latestAttempt.level_result}</Text>
+              </View>
+            </View>
+
+            <View style={styles.reportStats}>
+              <View style={styles.reportStat}>
+                <Text style={styles.reportStatLabel}>Last score</Text>
+                <Text style={styles.reportStatValue}>{formatPercent(latestAttempt.score_percent)}</Text>
+              </View>
+              <View style={styles.reportStat}>
+                <Text style={styles.reportStatLabel}>Theta</Text>
+                <Text style={styles.reportStatValue}>{formatTheta(latestAttempt.theta_final)}</Text>
+              </View>
+              <View style={styles.reportStat}>
+                <Text style={styles.reportStatLabel}>Test type</Text>
+                <Text style={styles.reportStatValue}>{latestAttempt.test_type}</Text>
+              </View>
+            </View>
+
+            <View style={styles.reportSection}>
+              <Text style={styles.reportSectionTitle}>Weak areas</Text>
+              {reportWeakTopics.length > 0 ? (
+                reportWeakTopics.map((item) => (
+                  <Text key={item.topic} style={styles.reportBullet}>
+                    - {item.topic}: {item.wrong_answers} wrong, {Math.round(item.accuracy_percent)}% accuracy
+                  </Text>
+                ))
+              ) : (
+                <Text style={styles.reportMuted}>No weak topics detected for the latest attempt.</Text>
+              )}
+            </View>
+
+            <View style={styles.reportSection}>
+              <Text style={styles.reportSectionTitle}>Recommendations</Text>
+              {reportRecommendations.length > 0 ? (
+                reportRecommendations.map((item) => (
+                  <Text key={item} style={styles.reportBullet}>- {item}</Text>
+                ))
+              ) : (
+                <Text style={styles.reportMuted}>No recommendations stored for the latest attempt yet.</Text>
+              )}
+            </View>
+          </View>
+        ) : (
+          <EmptyState
+            title="Report preview unavailable"
+            description="The preview appears after the student completes at least one test."
+            icon="document-text-outline"
+          />
+        )}
+      </AppCard>
 
       <AppCard title="Attempts" delay={90}>
         {payload.results.length > 0 ? (
@@ -147,6 +229,115 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     fontSize: 15,
     lineHeight: 22,
+  },
+  reportWrap: {
+    gap: 14,
+  },
+  reportHeader: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    padding: 12,
+    backgroundColor: "#F9FAFF",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  reportIdentity: {
+    flex: 1,
+    gap: 3,
+  },
+  reportLabel: {
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  reportName: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  reportDate: {
+    color: colors.mutedText,
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 17,
+  },
+  reportBadge: {
+    minWidth: 94,
+    borderRadius: 14,
+    backgroundColor: "#EEF1FF",
+    borderWidth: 1,
+    borderColor: "#C7D0FF",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    alignItems: "center",
+  },
+  reportBadgeLabel: {
+    color: colors.mutedText,
+    fontSize: 10,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  reportBadgeValue: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "900",
+    marginTop: 2,
+    textAlign: "center",
+  },
+  reportStats: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  reportStat: {
+    flex: 1,
+    minHeight: 72,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    padding: 10,
+    justifyContent: "space-between",
+  },
+  reportStatLabel: {
+    color: colors.mutedText,
+    fontSize: 10,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  reportStatValue: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  reportSection: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    padding: 12,
+    gap: 7,
+  },
+  reportSectionTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  reportBullet: {
+    color: colors.mutedText,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+  },
+  reportMuted: {
+    color: colors.mutedText,
+    fontSize: 13,
+    fontWeight: "600",
+    fontStyle: "italic",
+    lineHeight: 19,
   },
   listWrap: {
     gap: 10,
