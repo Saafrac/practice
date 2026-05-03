@@ -16,6 +16,54 @@ import { colors } from "../theme/colors";
 type ResultRoute = RouteProp<RootStackParamList, "TestResult">;
 type Navigation = NativeStackNavigationProp<RootStackParamList>;
 
+type LevelBand = {
+  cefr: string;
+  label: string;
+  nextLevel: string;
+  tone: "default" | "success" | "warning";
+};
+
+function getLevelBand(scorePercent: number): LevelBand {
+  if (scorePercent < 40) {
+    return {
+      cefr: "A1",
+      label: "Beginner foundation",
+      nextLevel: "A2 Elementary",
+      tone: "warning",
+    };
+  }
+  if (scorePercent < 55) {
+    return {
+      cefr: "A2",
+      label: "Elementary control",
+      nextLevel: "B1 Pre-Intermediate",
+      tone: "warning",
+    };
+  }
+  if (scorePercent < 75) {
+    return {
+      cefr: "B1",
+      label: "Independent basics",
+      nextLevel: "B2 Upper-Intermediate",
+      tone: "default",
+    };
+  }
+  if (scorePercent < 90) {
+    return {
+      cefr: "B2",
+      label: "Confident communicator",
+      nextLevel: "C1 Advanced",
+      tone: "success",
+    };
+  }
+  return {
+    cefr: "C1",
+    label: "Advanced range",
+    nextLevel: "C1+ fluency",
+    tone: "success",
+  };
+}
+
 export function TestResultScreen() {
   const route = useRoute<ResultRoute>();
   const navigation = useNavigation<Navigation>();
@@ -86,20 +134,43 @@ export function TestResultScreen() {
     );
   }
 
+  const scorePercent = Math.round(result.score_percent);
+  const levelBand = getLevelBand(result.score_percent);
+
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Text style={styles.kicker}>Test result</Text>
-        <Text style={styles.title}>{result.level_result}</Text>
-        <Text style={styles.subtitle}>You answered {result.correct_answers} of {result.total_questions} questions correctly.</Text>
+        <Text style={styles.title}>{levelBand.cefr} | {result.level_result}</Text>
+        <Text style={styles.subtitle}>
+          Your attempt has been converted into a clear placement summary for the next practice step.
+        </Text>
       </View>
 
+      <AppCard title="Score summary" subtitle={levelBand.label} delay={30}>
+        <View style={[styles.scoreCard, levelBand.tone === "success" && styles.scoreCardSuccess]}>
+          <View style={styles.scoreMain}>
+            <Text style={styles.scoreLabel}>Final score</Text>
+            <Text style={styles.scoreValue}>{scorePercent}%</Text>
+          </View>
+          <View style={styles.cefrBadge}>
+            <Text style={styles.cefrLabel}>CEFR-like</Text>
+            <Text style={styles.cefrValue}>{levelBand.cefr}</Text>
+          </View>
+        </View>
+        <View style={styles.nextLevelBox}>
+          <Text style={styles.nextLevelLabel}>Next recommended level</Text>
+          <Text style={styles.nextLevelValue}>{levelBand.nextLevel}</Text>
+        </View>
+      </AppCard>
+
       <View style={styles.statRow}>
-        <StatBox label="Score" value={`${Math.round(result.score_percent)}%`} tone="success" />
-        <StatBox label="Theta" value={result.theta_final.toFixed(2)} />
+        <StatBox label="Theta final" value={result.theta_final.toFixed(2)} />
+        <StatBox label="Correct" value={`${result.correct_answers}/${result.total_questions}`} tone="success" />
       </View>
 
       <AppCard title="Summary" delay={60}>
+        <Text style={styles.summaryLine}>Mapped level: {levelBand.cefr} - {levelBand.label}</Text>
         <Text style={styles.summaryLine}>Started: {new Date(result.started_at).toLocaleString()}</Text>
         <Text style={styles.summaryLine}>Finished: {new Date(result.finished_at).toLocaleString()}</Text>
         <Text style={styles.summaryLine}>Attempt ID: #{result.attempt_id}</Text>
@@ -112,7 +183,7 @@ export function TestResultScreen() {
       <AppCard title="Weak topics" delay={120}>
         {result.weak_topics.length > 0 ? (
           result.weak_topics.map((topic) => (
-            <Text key={topic} style={styles.summaryLine}>• {topic}</Text>
+            <Text key={topic} style={styles.summaryLine}>- {topic}</Text>
           ))
         ) : (
           <Text style={styles.summaryText}>No critical weak topics detected in this attempt.</Text>
@@ -122,7 +193,7 @@ export function TestResultScreen() {
       <AppCard title="Recommendations" delay={150}>
         {result.recommendations.length > 0 ? (
           result.recommendations.map((recommendation) => (
-            <Text key={recommendation} style={styles.summaryLine}>• {recommendation}</Text>
+            <Text key={recommendation} style={styles.summaryLine}>- {recommendation}</Text>
           ))
         ) : (
           <Text style={styles.summaryText}>Keep regular mixed practice to maintain your current level.</Text>
@@ -171,6 +242,74 @@ const styles = StyleSheet.create({
   statRow: {
     flexDirection: "row",
     gap: 10,
+  },
+  scoreCard: {
+    alignItems: "center",
+    backgroundColor: colors.dark,
+    borderRadius: 18,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: 16,
+    padding: 18,
+  },
+  scoreMain: {
+    flex: 1,
+    minWidth: 128,
+  },
+  scoreCardSuccess: {
+    backgroundColor: "#083B2A",
+  },
+  scoreLabel: {
+    color: "rgba(255,255,255,0.76)",
+    fontSize: 13,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  scoreValue: {
+    color: "#FFFFFF",
+    fontSize: 54,
+    fontWeight: "900",
+  },
+  cefrBadge: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.24)",
+    borderRadius: 16,
+    borderWidth: 1,
+    minWidth: 86,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  cefrLabel: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  cefrValue: {
+    color: "#FFFFFF",
+    fontSize: 30,
+    fontWeight: "900",
+  },
+  nextLevelBox: {
+    backgroundColor: "#F7F9FF",
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+    gap: 4,
+  },
+  nextLevelLabel: {
+    color: colors.mutedText,
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  nextLevelValue: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "800",
   },
   summaryLine: {
     color: colors.mutedText,
