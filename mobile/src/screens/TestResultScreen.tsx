@@ -6,15 +6,19 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { fetchAttemptResult } from "../api/testingApi";
 import { AppCard } from "../components/AppCard";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { ProgressBar } from "../components/ProgressBar";
 import { SkeletonBlock } from "../components/SkeletonBlock";
 import { StatBox } from "../components/StatBox";
 import { RootStackParamList } from "../navigation/types";
 import { useAuthStore } from "../store/authStore";
-import { AttemptResultResponse } from "../types/testing";
+import { AttemptResultResponse, ErrorProfileItem } from "../types/testing";
 import { colors } from "../theme/colors";
 
 type ResultRoute = RouteProp<RootStackParamList, "TestResult">;
 type Navigation = NativeStackNavigationProp<RootStackParamList>;
+type ErrorProfileDisplayItem = ErrorProfileItem & {
+  label: string;
+};
 
 type LevelBand = {
   cefr: string;
@@ -62,6 +66,56 @@ function getLevelBand(scorePercent: number): LevelBand {
     nextLevel: "C1+ fluency",
     tone: "success",
   };
+}
+
+const defaultErrorProfile: ErrorProfileDisplayItem[] = [
+  { topic: "grammar", label: "Grammar", total_questions: 0, wrong_answers: 0, accuracy_percent: 0 },
+  { topic: "vocabulary", label: "Vocabulary", total_questions: 0, wrong_answers: 0, accuracy_percent: 0 },
+  { topic: "reading", label: "Reading", total_questions: 0, wrong_answers: 0, accuracy_percent: 0 },
+  { topic: "listening", label: "Listening", total_questions: 0, wrong_answers: 0, accuracy_percent: 0 },
+];
+
+function formatTopic(topic: string) {
+  return topic
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function buildErrorProfile(errorProfile?: ErrorProfileItem[]): ErrorProfileDisplayItem[] {
+  if (!errorProfile || errorProfile.length === 0) {
+    return defaultErrorProfile;
+  }
+
+  const itemsByTopic = new Map(
+    errorProfile.map((item) => [
+      item.topic,
+      {
+        ...item,
+        label: formatTopic(item.topic),
+      },
+    ]),
+  );
+
+  const displayItems = defaultErrorProfile.map((item) => itemsByTopic.get(item.topic) ?? item);
+  const defaultTopics = new Set(defaultErrorProfile.map((item) => item.topic));
+  const extraItems = errorProfile
+    .filter((item) => !defaultTopics.has(item.topic))
+    .map((item) => ({ ...item, label: formatTopic(item.topic) }));
+
+  return [...displayItems, ...extraItems];
+}
+
+function findWeakestArea(errorProfile: ErrorProfileDisplayItem[]) {
+  return errorProfile.reduce((weakest, item) => {
+    if (item.wrong_answers > weakest.wrong_answers) {
+      return item;
+    }
+    if (item.wrong_answers === weakest.wrong_answers && item.accuracy_percent < weakest.accuracy_percent) {
+      return item;
+    }
+    return weakest;
+  }, errorProfile[0]);
 }
 
 export function TestResultScreen() {
@@ -136,6 +190,8 @@ export function TestResultScreen() {
 
   const scorePercent = Math.round(result.score_percent);
   const levelBand = getLevelBand(result.score_percent);
+  const errorProfile = buildErrorProfile(result.error_profile);
+  const weakestArea = findWeakestArea(errorProfile);
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
@@ -178,6 +234,23 @@ export function TestResultScreen() {
 
       <AppCard title="AI insight" delay={90}>
         <Text style={styles.summaryText}>{result.insight}</Text>
+      </AppCard>
+
+      <AppCard
+        title="Typical error profile"
+        subtitle={`Weakest area: ${weakestArea.label}`}
+        delay={105}
+      >
+        <View style={styles.profileList}>
+          {errorProfile.map((item) => (
+            <View key={item.topic} style={styles.profileItem}>
+              <ProgressBar label={item.label} value={Math.round(item.accuracy_percent)} />
+              <Text style={styles.profileMeta}>
+                {item.wrong_answers} wrong of {item.total_questions} questions
+              </Text>
+            </View>
+          ))}
+        </View>
       </AppCard>
 
       <AppCard title="Weak topics" delay={120}>
@@ -310,6 +383,22 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 20,
     fontWeight: "800",
+  },
+  profileList: {
+    gap: 12,
+  },
+  profileItem: {
+    backgroundColor: "#F7F9FF",
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 6,
+    padding: 12,
+  },
+  profileMeta: {
+    color: colors.mutedText,
+    fontSize: 12,
+    fontWeight: "700",
   },
   summaryLine: {
     color: colors.mutedText,

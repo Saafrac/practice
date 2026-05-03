@@ -47,6 +47,13 @@ export type SubmitAnswerResponse = {
   theta_after: number;
 };
 
+export type ErrorProfileItem = {
+  topic: string;
+  total_questions: number;
+  wrong_answers: number;
+  accuracy_percent: number;
+};
+
 export type AttemptResultResponse = {
   attempt_id: number;
   started_at: string;
@@ -59,4 +66,5 @@ export type AttemptResultResponse = {
   insight: string;
   weak_topics: string[];
   recommendations: string[];
+  error_profile?: ErrorProfileItem[];
 };

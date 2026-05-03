@@ -56,6 +56,13 @@ class SubmitAnswerResponse(BaseModel):
     theta_after: float
 
 
+class ErrorProfileItem(BaseModel):
+    topic: str
+    total_questions: int
+    wrong_answers: int
+    accuracy_percent: float
+
+
 class AttemptResultResponse(BaseModel):
     attempt_id: int
     started_at: datetime
@@ -68,4 +75,5 @@ class AttemptResultResponse(BaseModel):
     insight: str
     weak_topics: list[str]
     recommendations: list[str]
+    error_profile: list[ErrorProfileItem] = Field(default_factory=list)
 

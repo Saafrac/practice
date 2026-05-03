@@ -6,10 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 
 from app.api.deps.auth import get_current_user
-from app.db.models import Answer, TestType, User
+from app.db.models import Answer, ErrorProfile, TestType, User
 from app.db.session import get_db_session
 from app.schemas.testing import (
     AttemptResultResponse,
+    ErrorProfileItem,
     NextQuestionPayload,
     NextQuestionResponse,
     QuestionOptionPublic,
@@ -164,6 +165,13 @@ async def attempt_result(attempt_id: int, current_user: User = Depends(get_curre
             select(func.count(Answer.id)).where(Answer.attempt_id == attempt.id, Answer.is_correct.is_(True))
         )
         feedback = await get_attempt_feedback(session, attempt.id, Decimal(attempt.score_percent or Decimal("0")))
+        error_profile_rows = (
+            await session.execute(
+                select(ErrorProfile)
+                .where(ErrorProfile.attempt_id == attempt.id)
+                .order_by(ErrorProfile.wrong_answers.desc(), ErrorProfile.topic.asc())
+            )
+        ).scalars().all()
 
     total_questions = len(answered_question_ids)
     correct_total = int(correct_answers or 0)
@@ -180,4 +188,13 @@ async def attempt_result(attempt_id: int, current_user: User = Depends(get_curre
         insight=feedback.insight,
         weak_topics=feedback.weak_topics,
         recommendations=feedback.recommendations,
+        error_profile=[
+            ErrorProfileItem(
+                topic=item.topic,
+                total_questions=item.total_questions,
+                wrong_answers=item.wrong_answers,
+                accuracy_percent=float(item.accuracy_percent),
+            )
+            for item in error_profile_rows
+        ],
     )
