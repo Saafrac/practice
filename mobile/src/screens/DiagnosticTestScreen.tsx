@@ -8,12 +8,25 @@ import { AppCard } from "../components/AppCard";
 import { EmptyState } from "../components/EmptyState";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ProgressBar } from "../components/ProgressBar";
+import { StatBox } from "../components/StatBox";
 import { RootStackParamList } from "../navigation/types";
 import { useAuthStore } from "../store/authStore";
-import { NextQuestionResponse, TestQuestion } from "../types/testing";
+import { NextQuestionResponse, SubmitAnswerResponse, TestQuestion } from "../types/testing";
 import { colors } from "../theme/colors";
 
 type Navigation = NativeStackNavigationProp<RootStackParamList>;
+type AnswerFeedback = Pick<SubmitAnswerResponse, "is_correct" | "theta_before" | "theta_after">;
+
+function formatTheta(value: number) {
+  return value.toFixed(2);
+}
+
+function formatTopic(topic: string) {
+  return topic
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 export function DiagnosticTestScreen() {
   const navigation = useNavigation<Navigation>();
@@ -23,6 +36,8 @@ export function DiagnosticTestScreen() {
   const [maxQuestions, setMaxQuestions] = useState(12);
   const [question, setQuestion] = useState<TestQuestion | null>(null);
   const [answeredQuestions, setAnsweredQuestions] = useState(0);
+  const [currentTheta, setCurrentTheta] = useState(0);
+  const [answerFeedback, setAnswerFeedback] = useState<AnswerFeedback | null>(null);
   const [selectedOptionId, setSelectedOptionId] = useState<number | null>(null);
   const [isBootLoading, setIsBootLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -34,6 +49,20 @@ export function DiagnosticTestScreen() {
     }
     return Math.round((answeredQuestions / maxQuestions) * 100);
   }, [answeredQuestions, maxQuestions]);
+
+  const remainingQuestions = Math.max(maxQuestions - answeredQuestions, 0);
+
+  useEffect(() => {
+    if (!answerFeedback) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      setAnswerFeedback(null);
+    }, 3600);
+
+    return () => clearTimeout(timeoutId);
+  }, [answerFeedback]);
 
   useEffect(() => {
     let isMounted = true;
@@ -82,6 +111,7 @@ export function DiagnosticTestScreen() {
   const applyNextQuestion = (next: NextQuestionResponse) => {
     setAnsweredQuestions(next.answered_questions);
     setMaxQuestions(next.max_questions);
+    setCurrentTheta(next.current_theta);
     setSelectedOptionId(null);
 
     if (next.is_finished || !next.question) {
@@ -107,6 +137,12 @@ export function DiagnosticTestScreen() {
       });
 
       setAnsweredQuestions(result.answered_questions);
+      setCurrentTheta(result.theta_after);
+      setAnswerFeedback({
+        is_correct: result.is_correct,
+        theta_before: result.theta_before,
+        theta_after: result.theta_after,
+      });
 
       if (result.is_finished) {
         navigation.replace("TestResult", { attemptId });
@@ -146,23 +182,74 @@ export function DiagnosticTestScreen() {
       <View style={styles.header}>
         <Text style={styles.kicker}>Diagnostic test</Text>
         <Text style={styles.title}>Find your starting level</Text>
-        <Text style={styles.subtitle}>Answer one question at a time. Difficulty will be adapted in next stage.</Text>
+        <Text style={styles.subtitle}>
+          This short calibration estimates your English level before practice begins.
+        </Text>
       </View>
+
+      <AppCard
+        title="Diagnostic purpose"
+        subtitle="Each answer updates theta, the ability estimate used to place you into the right starting band."
+      >
+        <View style={styles.purposeRow}>
+          <Text style={styles.purposeText}>Goal</Text>
+          <Text style={styles.purposeValue}>Fast placement, not a final grade</Text>
+        </View>
+      </AppCard>
 
       <AppCard title="Progress" subtitle={`${answeredQuestions}/${maxQuestions} completed`}>
         <ProgressBar label="Completion" value={progressValue} />
+        <View style={styles.statsRow}>
+          <StatBox label="Theta" value={formatTheta(currentTheta)} />
+          <StatBox label="Remaining" value={`${remainingQuestions}`} tone="warning" />
+        </View>
       </AppCard>
 
+      {answerFeedback ? (
+        <View
+          style={[
+            styles.feedback,
+            answerFeedback.is_correct ? styles.feedbackCorrect : styles.feedbackIncorrect,
+          ]}
+        >
+          <Text
+            style={[
+              styles.feedbackStatus,
+              answerFeedback.is_correct ? styles.feedbackStatusCorrect : styles.feedbackStatusIncorrect,
+            ]}
+          >
+            {answerFeedback.is_correct ? "Correct" : "Incorrect"}
+          </Text>
+          <Text style={styles.feedbackTheta}>
+            theta {formatTheta(answerFeedback.theta_before)}
+            {" -> "}
+            {formatTheta(answerFeedback.theta_after)}
+          </Text>
+        </View>
+      ) : null}
+
       {question ? (
-        <AppCard title={question.text} subtitle={`Topic: ${question.topic} | Difficulty: ${question.difficulty}`}>
+        <AppCard title={question.text} subtitle="Choose the best answer. The engine will update theta after submission.">
+          <View style={styles.questionMeta}>
+            <View style={styles.badge}>
+              <Text style={styles.badgeLabel}>Topic</Text>
+              <Text style={styles.badgeValue}>{formatTopic(question.topic)}</Text>
+            </View>
+            <View style={[styles.badge, styles.badgeDifficulty]}>
+              <Text style={styles.badgeLabel}>Difficulty b</Text>
+              <Text style={styles.badgeValue}>{question.difficulty}</Text>
+            </View>
+          </View>
+
           <View style={styles.optionsWrap}>
             {question.options.map((option) => {
               const isSelected = selectedOptionId === option.id;
               return (
                 <Pressable
                   key={option.id}
+                  disabled={isSubmitting}
                   onPress={() => setSelectedOptionId(option.id)}
-                  style={[styles.option, isSelected && styles.optionSelected]}
+                  style={[styles.option, isSelected && styles.optionSelected, isSubmitting && styles.optionDisabled]}
                 >
                   <Text style={[styles.optionText, isSelected && styles.optionTextSelected]}>{option.text}</Text>
                 </Pressable>
@@ -239,6 +326,94 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
   },
+  purposeRow: {
+    borderRadius: 14,
+    backgroundColor: "#F7F9FF",
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    gap: 4,
+  },
+  purposeText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  purposeValue: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  statsRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  feedback: {
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
+  feedbackCorrect: {
+    backgroundColor: "#ECFDF3",
+    borderColor: "#B7EACB",
+  },
+  feedbackIncorrect: {
+    backgroundColor: "#FEF3F2",
+    borderColor: "#FECDCA",
+  },
+  feedbackStatus: {
+    fontSize: 14,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  feedbackStatusCorrect: {
+    color: colors.success,
+  },
+  feedbackStatusIncorrect: {
+    color: colors.danger,
+  },
+  feedbackTheta: {
+    color: colors.text,
+    flexShrink: 1,
+    fontSize: 14,
+    fontWeight: "800",
+    textAlign: "right",
+  },
+  questionMeta: {
+    flexDirection: "row",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  badge: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#BFD0FF",
+    backgroundColor: "#EEF4FF",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    minWidth: 118,
+  },
+  badgeDifficulty: {
+    backgroundColor: "#FFF7EA",
+    borderColor: "#FCD9A6",
+  },
+  badgeLabel: {
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  badgeValue: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "800",
+  },
   optionsWrap: {
     gap: 10,
   },
@@ -253,6 +428,9 @@ const styles = StyleSheet.create({
   optionSelected: {
     borderColor: colors.primary,
     backgroundColor: "#EEF1FF",
+  },
+  optionDisabled: {
+    opacity: 0.7,
   },
   optionText: {
     color: colors.text,
