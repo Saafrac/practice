@@ -20,6 +20,14 @@ import { colors } from "../theme/colors";
 
 const roleCycle: AdminRole[] = ["student", "teacher", "admin"];
 
+const difficultyBands = [
+  { value: -2, label: "A1", shortLabel: "A1", description: "b=-2" },
+  { value: -1, label: "A2", shortLabel: "A2", description: "b=-1" },
+  { value: 0, label: "B1", shortLabel: "B1", description: "b=0" },
+  { value: 1, label: "B2", shortLabel: "B2", description: "b=1" },
+  { value: 2, label: "C1", shortLabel: "C1", description: "b=2" },
+] as const;
+
 type QuestionFormState = {
   text: string;
   topic: string;
@@ -41,6 +49,15 @@ const defaultForm: QuestionFormState = {
 function nextRole(role: AdminRole): AdminRole {
   const idx = roleCycle.indexOf(role);
   return roleCycle[(idx + 1) % roleCycle.length];
+}
+
+function difficultyLabel(difficulty: number) {
+  const band = difficultyBands.find((item) => item.value === difficulty);
+  return band ? `${band.label} (${band.description})` : `b=${difficulty}`;
+}
+
+function normalizeTopic(topic: string) {
+  return topic.trim().toLowerCase();
 }
 
 function questionToForm(question: AdminQuestionItem): QuestionFormState {
@@ -73,6 +90,20 @@ export function AdminDashboardScreen() {
   const usersCount = users.length;
   const questionsCount = questions.length;
 
+  const topicChips = useMemo(() => {
+    const topics = Array.from(new Set(questions.map((question) => normalizeTopic(question.topic)).filter(Boolean)));
+    return topics.sort((a, b) => a.localeCompare(b));
+  }, [questions]);
+
+  const difficultyCounts = useMemo(
+    () =>
+      difficultyBands.map((band) => ({
+        ...band,
+        count: questions.filter((question) => question.difficulty === band.value).length,
+      })),
+    [questions],
+  );
+
   const parsedDifficultyFilter = useMemo(() => {
     if (!difficultyFilter.trim()) {
       return undefined;
@@ -95,10 +126,7 @@ export function AdminDashboardScreen() {
     try {
       const [usersResponse, questionsResponse] = await Promise.all([
         fetchAdminUsers(token),
-        fetchAdminQuestions(token, {
-          difficulty: parsedDifficultyFilter,
-          topic: topicFilter.trim() || undefined,
-        }),
+        fetchAdminQuestions(token),
       ]);
       setUsers(usersResponse.users);
       setQuestions(questionsResponse.questions);
@@ -115,9 +143,20 @@ export function AdminDashboardScreen() {
   }, [token]);
 
   const onApplyFilters = async () => {
-    setIsLoading(true);
     await loadAdminData();
   };
+
+  const visibleQuestions = useMemo(() => {
+    const normalizedTopicFilter = normalizeTopic(topicFilter);
+    return questions.filter((question) => {
+      const matchesTopic = normalizedTopicFilter
+        ? normalizeTopic(question.topic).includes(normalizedTopicFilter)
+        : true;
+      const matchesDifficulty =
+        typeof parsedDifficultyFilter === "number" ? question.difficulty === parsedDifficultyFilter : true;
+      return matchesTopic && matchesDifficulty;
+    });
+  }, [parsedDifficultyFilter, questions, topicFilter]);
 
   const onRotateRole = async (user: AdminUserItem) => {
     if (!token) {
@@ -258,6 +297,11 @@ export function AdminDashboardScreen() {
         <StatBox label="Questions" value={`${questionsCount}`} />
       </View>
 
+      <View style={styles.statRow}>
+        <StatBox label="Visible" value={`${visibleQuestions.length}`} />
+        <StatBox label="Topics" value={`${topicChips.length}`} tone="success" />
+      </View>
+
       {error ? (
         <AppCard title="Action failed" subtitle={error}>
           <PrimaryButton
@@ -299,7 +343,43 @@ export function AdminDashboardScreen() {
         )}
       </AppCard>
 
-      <AppCard title="Question filters" delay={110}>
+      <AppCard title="Difficulty b overview" subtitle="Question count by CEFR-like difficulty band" delay={100}>
+        <View style={styles.difficultyGrid}>
+          {difficultyCounts.map((band) => (
+            <View key={band.value} style={styles.difficultyCountCard}>
+              <Text style={styles.difficultyCountLabel}>{band.shortLabel}</Text>
+              <Text style={styles.difficultyCountValue}>{band.count}</Text>
+              <Text style={styles.difficultyCountMeta}>{band.description}</Text>
+            </View>
+          ))}
+        </View>
+      </AppCard>
+
+      <AppCard title="Question filters" subtitle="Use shortcuts for defense, or type a custom topic" delay={110}>
+        <View style={styles.filterSection}>
+          <Text style={styles.formLabel}>Topic shortcuts</Text>
+          <View style={styles.chipWrap}>
+            <Pressable
+              style={[styles.filterChip, !topicFilter.trim() && styles.filterChipActive]}
+              onPress={() => setTopicFilter("")}
+            >
+              <Text style={[styles.filterChipText, !topicFilter.trim() && styles.filterChipTextActive]}>All</Text>
+            </Pressable>
+            {topicChips.map((topic) => {
+              const isActive = normalizeTopic(topicFilter) === topic;
+              return (
+                <Pressable
+                  key={topic}
+                  style={[styles.filterChip, isActive && styles.filterChipActive]}
+                  onPress={() => setTopicFilter(topic)}
+                >
+                  <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>{topic}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
         <TextInput
           style={styles.input}
           placeholder="Topic filter (e.g. grammar)"
@@ -307,18 +387,41 @@ export function AdminDashboardScreen() {
           value={topicFilter}
           onChangeText={setTopicFilter}
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Difficulty filter (-2..2)"
-          placeholderTextColor="#8A94B8"
-          value={difficultyFilter}
-          onChangeText={setDifficultyFilter}
-          keyboardType="numeric"
-        />
+
+        <View style={styles.filterSection}>
+          <Text style={styles.formLabel}>Difficulty b filter</Text>
+          <View style={styles.chipWrap}>
+            <Pressable
+              style={[styles.filterChip, !difficultyFilter.trim() && styles.filterChipActive]}
+              onPress={() => setDifficultyFilter("")}
+            >
+              <Text style={[styles.filterChipText, !difficultyFilter.trim() && styles.filterChipTextActive]}>All</Text>
+            </Pressable>
+            {difficultyBands.map((band) => {
+              const isActive = difficultyFilter === String(band.value);
+              return (
+                <Pressable
+                  key={band.value}
+                  style={[styles.filterChip, isActive && styles.filterChipActive]}
+                  onPress={() => setDifficultyFilter(String(band.value))}
+                >
+                  <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+                    {band.shortLabel} {band.description}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
         <PrimaryButton title="Apply filters" onPress={() => void onApplyFilters()} />
       </AppCard>
 
-      <AppCard title={editQuestionId ? `Edit question #${editQuestionId}` : "Create new question"} delay={140}>
+      <AppCard
+        title={editQuestionId ? `Edit question #${editQuestionId}` : "Create question"}
+        subtitle="Manage topic, options, correct answer, and difficulty parameter b"
+        delay={140}
+      >
+        <Text style={styles.formLabel}>Question text</Text>
         <TextInput
           style={[styles.input, styles.inputMultiline]}
           placeholder="Question text"
@@ -327,6 +430,7 @@ export function AdminDashboardScreen() {
           onChangeText={(value) => setForm((prev) => ({ ...prev, text: value }))}
           multiline
         />
+        <Text style={styles.formLabel}>Topic</Text>
         <TextInput
           style={styles.input}
           placeholder="Topic (grammar, vocabulary...)"
@@ -334,14 +438,24 @@ export function AdminDashboardScreen() {
           value={form.topic}
           onChangeText={(value) => setForm((prev) => ({ ...prev, topic: value }))}
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Difficulty (-2..2)"
-          placeholderTextColor="#8A94B8"
-          value={form.difficulty}
-          onChangeText={(value) => setForm((prev) => ({ ...prev, difficulty: value }))}
-          keyboardType="numeric"
-        />
+        <Text style={styles.formLabel}>Difficulty b</Text>
+        <View style={styles.chipWrap}>
+          {difficultyBands.map((band) => {
+            const isActive = form.difficulty === String(band.value);
+            return (
+              <Pressable
+                key={band.value}
+                style={[styles.filterChip, isActive && styles.filterChipActive]}
+                onPress={() => setForm((prev) => ({ ...prev, difficulty: String(band.value) }))}
+              >
+                <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+                  {band.label} {band.description}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.formLabel}>Correct option index</Text>
         <TextInput
           style={styles.input}
           placeholder="Correct option index (0-based)"
@@ -350,6 +464,7 @@ export function AdminDashboardScreen() {
           onChangeText={(value) => setForm((prev) => ({ ...prev, correctIndex: value }))}
           keyboardType="numeric"
         />
+        <Text style={styles.formLabel}>Answer options</Text>
         <TextInput
           style={[styles.input, styles.inputMultiline]}
           placeholder="Options: one option per line"
@@ -358,6 +473,7 @@ export function AdminDashboardScreen() {
           onChangeText={(value) => setForm((prev) => ({ ...prev, optionsText: value }))}
           multiline
         />
+        <Text style={styles.formLabel}>Explanation</Text>
         <TextInput
           style={[styles.input, styles.inputMultiline]}
           placeholder="Explanation (optional)"
@@ -376,12 +492,15 @@ export function AdminDashboardScreen() {
         ) : null}
       </AppCard>
 
-      <AppCard title="Question bank" delay={170}>
-        {questions.length > 0 ? (
+      <AppCard title="Question bank" subtitle={`${visibleQuestions.length} of ${questions.length} questions shown`} delay={170}>
+        {visibleQuestions.length > 0 ? (
           <View style={styles.listWrap}>
-            {questions.map((question) => (
+            {visibleQuestions.map((question) => (
               <View key={question.id} style={styles.rowCardVertical}>
-                <Text style={styles.rowTitle}>#{question.id} • {question.topic} • d={question.difficulty}</Text>
+                <View style={styles.questionHeader}>
+                  <Text style={styles.rowTitle}>#{question.id} • {question.topic}</Text>
+                  <Text style={styles.difficultyBadge}>{difficultyLabel(question.difficulty)}</Text>
+                </View>
                 <Text style={styles.questionText}>{question.text}</Text>
                 <Text style={styles.rowMeta}>Options: {question.options.length}</Text>
                 <View style={styles.inlineActions}>
@@ -401,8 +520,12 @@ export function AdminDashboardScreen() {
           </View>
         ) : (
           <EmptyState
-            title="No questions"
-            description="Create your first question using the form above."
+            title={questions.length > 0 ? "No questions match filters" : "No questions"}
+            description={
+              questions.length > 0
+                ? "Change the topic or difficulty shortcuts to show more questions."
+                : "Create your first question using the form above."
+            }
             icon="help-circle-outline"
           />
         )}
@@ -444,6 +567,70 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
   },
+  difficultyGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  difficultyCountCard: {
+    flexGrow: 1,
+    minWidth: 82,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    backgroundColor: "#F9FAFF",
+    padding: 10,
+    gap: 3,
+  },
+  difficultyCountLabel: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  difficultyCountValue: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  difficultyCountMeta: {
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  filterSection: {
+    gap: 8,
+  },
+  chipWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  filterChip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    backgroundColor: "#F9FAFF",
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  filterChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: "#EEF1FF",
+  },
+  filterChipText: {
+    color: colors.mutedText,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  filterChipTextActive: {
+    color: colors.primary,
+  },
+  formLabel: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
   listWrap: {
     gap: 10,
   },
@@ -482,6 +669,24 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 13,
     fontWeight: "600",
+  },
+  questionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  difficultyBadge: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "900",
+    backgroundColor: "#EEF1FF",
+    borderWidth: 1,
+    borderColor: "#C7D0FF",
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    overflow: "hidden",
   },
   actionButton: {
     alignSelf: "center",
