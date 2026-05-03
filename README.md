@@ -95,6 +95,8 @@ Demo credentials:
 - `bella@adaptive.test` / `Student123!`
 - `chris@adaptive.test` / `Student123!`
 
+The Login screen includes one-tap demo buttons for the student, teacher, and admin accounts above.
+
 ### 3. Start mobile app
 
 ```bash

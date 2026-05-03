@@ -13,6 +13,24 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { GradientScreen } from "../components/GradientScreen";
 import { useAuthStore } from "../store/authStore";
 
+const demoAccounts = [
+  {
+    title: "Login as Student",
+    email: "alex@adaptive.test",
+    password: "Student123!",
+  },
+  {
+    title: "Login as Teacher",
+    email: "teacher@adaptive.test",
+    password: "Teacher123!",
+  },
+  {
+    title: "Login as Admin",
+    email: "admin@adaptive.test",
+    password: "Admin123!",
+  },
+];
+
 export function LoginScreen() {
   const navigation = useNavigation<any>();
   const login = useAuthStore((state) => state.login);
@@ -43,6 +61,15 @@ export function LoginScreen() {
     await login({
       email: email.trim(),
       password,
+    });
+  };
+
+  const onDemoLogin = async (demoAccount: (typeof demoAccounts)[number]) => {
+    setEmail(demoAccount.email);
+    setPassword(demoAccount.password);
+    await login({
+      email: demoAccount.email,
+      password: demoAccount.password,
     });
   };
 
@@ -85,6 +112,22 @@ export function LoginScreen() {
             onPress={onSubmit}
             disabled={isLoading || Boolean(localError)}
           />
+
+          <View style={styles.demoBlock}>
+            <Text style={styles.demoTitle}>Demo accounts</Text>
+            <View style={styles.demoButtons}>
+              {demoAccounts.map((demoAccount) => (
+                <PrimaryButton
+                  key={demoAccount.email}
+                  title={demoAccount.title}
+                  onPress={() => onDemoLogin(demoAccount)}
+                  disabled={isLoading}
+                  variant="ghost"
+                />
+              ))}
+            </View>
+          </View>
+
           {isLoading ? <ActivityIndicator color="#4458FF" /> : null}
 
           <Pressable onPress={() => navigation.navigate("Register")}>
@@ -141,6 +184,23 @@ const styles = StyleSheet.create({
     color: "#E53935",
     fontSize: 13,
     fontWeight: "600",
+  },
+  demoBlock: {
+    borderTopColor: "#EEF1FF",
+    borderTopWidth: 1,
+    gap: 10,
+    marginTop: 2,
+    paddingTop: 14,
+  },
+  demoTitle: {
+    color: "#5B668A",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0,
+    textTransform: "uppercase",
+  },
+  demoButtons: {
+    gap: 8,
   },
   switchText: {
     color: "#4458FF",
