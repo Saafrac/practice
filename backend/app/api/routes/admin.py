@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import selectinload
 
 from app.api.deps.auth import require_roles
-from app.db.models import Option, Question, User, UserRole
+from app.db.models import Option, Question, Test, User, UserRole
 from app.db.session import get_db_session
 from app.schemas.admin import (
     AdminQuestionItem,
     AdminQuestionOption,
     AdminQuestionsResponse,
     AdminQuestionUpsertRequest,
+    AdminSystemStatusResponse,
     AdminUpdateUserRoleRequest,
     AdminUserItem,
     AdminUsersResponse,
@@ -46,6 +47,28 @@ async def users(current_user: User = Depends(require_roles(UserRole.ADMIN))) -> 
     async with get_db_session() as session:
         rows = (await session.execute(select(User).order_by(User.created_at.desc()))).scalars().all()
     return AdminUsersResponse(users=[AdminUserItem.model_validate(row) for row in rows])
+
+
+@router.get("/system-status", response_model=AdminSystemStatusResponse)
+async def system_status(current_user: User = Depends(require_roles(UserRole.ADMIN))) -> AdminSystemStatusResponse:
+    del current_user
+    async with get_db_session() as session:
+        await session.execute(text("SELECT 1"))
+        users_count = await session.scalar(select(func.count(User.id)))
+        questions_count = await session.scalar(select(func.count(Question.id)))
+        active_tests_count = await session.scalar(select(func.count(Test.id)).where(Test.is_active.is_(True)))
+        last_user_update = await session.scalar(select(func.max(User.created_at)))
+        last_question_update = await session.scalar(select(func.max(Question.created_at)))
+
+    last_updates = [value for value in (last_user_update, last_question_update) if value is not None]
+    return AdminSystemStatusResponse(
+        api_status="online",
+        database_status="online",
+        users_count=int(users_count or 0),
+        questions_count=int(questions_count or 0),
+        active_tests_count=int(active_tests_count or 0),
+        last_seed_update=max(last_updates) if last_updates else None,
+    )
 
 
 @router.patch("/users/{user_id}/role", response_model=AdminUserItem)

@@ -74,13 +74,19 @@ class RecommendationCardItem(BaseModel):
 
 class AttemptResultResponse(BaseModel):
     attempt_id: int
+    test_type: TestType
     started_at: datetime
     finished_at: datetime
     score_percent: float
     level_result: str
+    cefr: str
     theta_final: float
     total_questions: int
     correct_answers: int
+    previous_score_percent: float | None = None
+    score_delta: float | None = None
+    previous_theta_final: float | None = None
+    theta_delta: float | None = None
     insight: str
     weak_topics: list[str]
     recommendations: list[str]

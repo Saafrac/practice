@@ -6,6 +6,7 @@ import { RegisterScreen } from "../screens/RegisterScreen";
 import { SplashScreen } from "../screens/SplashScreen";
 import { AdaptiveTestScreen } from "../screens/AdaptiveTestScreen";
 import { DiagnosticTestScreen } from "../screens/DiagnosticTestScreen";
+import { FinalTestScreen } from "../screens/FinalTestScreen";
 import { HistoryScreen } from "../screens/HistoryScreen";
 import { TeacherStudentResultsScreen } from "../screens/TeacherStudentResultsScreen";
 import { TestResultScreen } from "../screens/TestResultScreen";
@@ -45,6 +46,11 @@ export function RootNavigator() {
             name="AdaptiveTest"
             component={AdaptiveTestScreen}
             options={{ headerShown: true, title: "Adaptive Test" }}
+          />
+          <Stack.Screen
+            name="FinalTest"
+            component={FinalTestScreen}
+            options={{ headerShown: true, title: "Final Test" }}
           />
           <Stack.Screen
             name="History"

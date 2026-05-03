@@ -4,6 +4,7 @@ import {
   AdminQuestionUpsertPayload,
   AdminQuestionsResponse,
   AdminRole,
+  AdminSystemStatusResponse,
   AdminUserItem,
   AdminUsersResponse,
 } from "../types/admin";
@@ -40,6 +41,10 @@ async function authedRequest<T>(token: string, path: string, options: RequestIni
 
 export async function fetchAdminUsers(token: string): Promise<AdminUsersResponse> {
   return authedRequest<AdminUsersResponse>(token, "/admin/users", { method: "GET" });
+}
+
+export async function fetchAdminSystemStatus(token: string): Promise<AdminSystemStatusResponse> {
+  return authedRequest<AdminSystemStatusResponse>(token, "/admin/system-status", { method: "GET" });
 }
 
 export async function updateAdminUserRole(

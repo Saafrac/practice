@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 
 from app.api.deps.auth import get_current_user
-from app.db.models import Answer, ErrorProfile, TestType, User
+from app.db.models import Answer, ErrorProfile, TestAttempt, TestType, User
 from app.db.session import get_db_session
 from app.schemas.testing import (
     AttemptResultResponse,
@@ -26,6 +26,7 @@ from app.services.diagnostic_testing import (
     get_last_theta,
     get_next_question_for_attempt,
     get_question_limit,
+    map_score_to_cefr,
     start_test_attempt,
     submit_test_answer,
     finalize_attempt_if_needed,
@@ -56,6 +57,11 @@ async def start_diagnostic(current_user: User = Depends(get_current_user)) -> Te
 @router.post("/adaptive/start", response_model=TestAttemptStartResponse, status_code=status.HTTP_201_CREATED)
 async def start_adaptive(current_user: User = Depends(get_current_user)) -> TestAttemptStartResponse:
     return await _start_attempt_by_type(TestType.ADAPTIVE, current_user)
+
+
+@router.post("/final/start", response_model=TestAttemptStartResponse, status_code=status.HTTP_201_CREATED)
+async def start_final(current_user: User = Depends(get_current_user)) -> TestAttemptStartResponse:
+    return await _start_attempt_by_type(TestType.FINAL, current_user)
 
 
 @router.get("/{attempt_id}/next-question", response_model=NextQuestionResponse)
@@ -151,10 +157,18 @@ async def submit_answer(
     )
 
 
-@router.get("/{attempt_id}/result", response_model=AttemptResultResponse)
-async def attempt_result(attempt_id: int, current_user: User = Depends(get_current_user)) -> AttemptResultResponse:
+async def _build_attempt_result_response(
+    attempt_id: int,
+    current_user: User,
+    expected_test_type: TestType | None = None,
+) -> AttemptResultResponse:
     async with get_db_session() as session:
         attempt = await get_attempt_for_user(session, attempt_id, current_user)
+        if expected_test_type is not None and attempt.test.type != expected_test_type:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"{expected_test_type.value.title()} result not found for this attempt.",
+            )
         if attempt.finished_at is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -173,19 +187,39 @@ async def attempt_result(attempt_id: int, current_user: User = Depends(get_curre
                 .order_by(ErrorProfile.wrong_answers.desc(), ErrorProfile.topic.asc())
             )
         ).scalars().all()
+        previous_attempt = await session.scalar(
+            select(TestAttempt)
+            .where(
+                TestAttempt.user_id == attempt.user_id,
+                TestAttempt.id != attempt.id,
+                TestAttempt.finished_at.is_not(None),
+            )
+            .order_by(TestAttempt.finished_at.desc())
+            .limit(1)
+        )
 
     total_questions = len(answered_question_ids)
     correct_total = int(correct_answers or 0)
+    score_percent = float(attempt.score_percent or Decimal("0"))
+    theta_final = float(attempt.theta_final or Decimal("0"))
+    previous_score = float(previous_attempt.score_percent) if previous_attempt and previous_attempt.score_percent is not None else None
+    previous_theta = float(previous_attempt.theta_final) if previous_attempt and previous_attempt.theta_final is not None else None
 
     return AttemptResultResponse(
         attempt_id=attempt.id,
+        test_type=attempt.test.type,
         started_at=attempt.started_at,
         finished_at=attempt.finished_at,
-        score_percent=float(attempt.score_percent or Decimal("0")),
+        score_percent=score_percent,
         level_result=attempt.level_result or "Beginner",
-        theta_final=float(attempt.theta_final or Decimal("0")),
+        cefr=map_score_to_cefr(Decimal(str(score_percent))),
+        theta_final=theta_final,
         total_questions=total_questions,
         correct_answers=correct_total,
+        previous_score_percent=previous_score,
+        score_delta=round(score_percent - previous_score, 2) if previous_score is not None else None,
+        previous_theta_final=previous_theta,
+        theta_delta=round(theta_final - previous_theta, 2) if previous_theta is not None else None,
         insight=feedback.insight,
         weak_topics=feedback.weak_topics,
         recommendations=feedback.recommendations,
@@ -210,3 +244,13 @@ async def attempt_result(attempt_id: int, current_user: User = Depends(get_curre
             for item in error_profile_rows
         ],
     )
+
+
+@router.get("/final/{attempt_id}/result", response_model=AttemptResultResponse)
+async def final_attempt_result(attempt_id: int, current_user: User = Depends(get_current_user)) -> AttemptResultResponse:
+    return await _build_attempt_result_response(attempt_id, current_user, expected_test_type=TestType.FINAL)
+
+
+@router.get("/{attempt_id}/result", response_model=AttemptResultResponse)
+async def attempt_result(attempt_id: int, current_user: User = Depends(get_current_user)) -> AttemptResultResponse:
+    return await _build_attempt_result_response(attempt_id, current_user)

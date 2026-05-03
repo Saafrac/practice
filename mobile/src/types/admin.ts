@@ -33,6 +33,15 @@ export type AdminQuestionsResponse = {
   questions: AdminQuestionItem[];
 };
 
+export type AdminSystemStatusResponse = {
+  api_status: "online" | string;
+  database_status: "online" | string;
+  users_count: number;
+  questions_count: number;
+  active_tests_count: number;
+  last_seed_update: string | null;
+};
+
 export type AdminQuestionUpsertPayload = {
   text: string;
   difficulty: number;

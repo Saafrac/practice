@@ -62,6 +62,11 @@ def question_bank() -> list[SeedQuestion]:
         SeedQuestion("Choose the correct article: ___ Nile is the longest river in Africa.", "articles", 1, ("A", "An", "The", "No article"), 2, "Names of rivers take 'the'."),
         SeedQuestion("He suggested that we ___ earlier tomorrow.", "grammar", 1, ("leave", "leaves", "left", "to leave"), 0, "After 'suggested that' use base form (subjunctive style)."),
         SeedQuestion("Rarely ___ such a talented student.", "word_order", 2, ("I have seen", "have I seen", "I saw", "did I saw"), 1, "Negative adverb fronting requires inversion."),
+        SeedQuestion("Listening mock: You hear 'The train leaves at quarter past seven.' What time is it?", "listening", -1, ("7:00", "7:15", "7:30", "7:45"), 1, "Quarter past seven means 7:15."),
+        SeedQuestion("Listening mock: The speaker says she is booking a table for two. Where is she calling?", "listening", 0, ("A restaurant", "A library", "A bank", "A gym"), 0, "Booking a table usually happens at a restaurant."),
+        SeedQuestion("Listening mock: A man says, 'Could you repeat that more slowly?' What does he need?", "listening", 0, ("A faster answer", "A clearer repetition", "A written receipt", "A new ticket"), 1, "He asks the speaker to repeat more slowly."),
+        SeedQuestion("Listening mock: The announcement says the meeting was postponed until Friday. What changed?", "listening", 1, ("The place", "The price", "The date", "The topic"), 2, "Postponed until Friday means the meeting date changed."),
+        SeedQuestion("Listening mock: The speaker recommends taking notes while listening to lectures. What strategy is suggested?", "listening", 1, ("Ignore details", "Write notes", "Translate every word", "Read silently"), 1, "The explicit recommendation is to take notes."),
     ]
 
 
@@ -124,15 +129,18 @@ async def seed_tests() -> None:
     tests = [
         ("Diagnostic Placement Test", TestType.DIAGNOSTIC, True),
         ("Adaptive English Skills Test", TestType.ADAPTIVE, True),
-        ("Final Progress Check", TestType.FINAL, False),
+        ("Final English Assessment", TestType.FINAL, True),
     ]
     async with SessionLocal() as session:
         existing = {
-            (test.title, test.type): test
+            test.type: test
             for test in (await session.execute(select(Test))).scalars().all()
         }
         for title, test_type, is_active in tests:
-            if (title, test_type) in existing:
+            if test_type in existing:
+                existing_test = existing[test_type]
+                existing_test.title = title
+                existing_test.is_active = is_active
                 continue
             session.add(Test(title=title, type=test_type, is_active=is_active))
         await session.commit()
@@ -140,11 +148,11 @@ async def seed_tests() -> None:
 
 async def seed_questions() -> None:
     async with SessionLocal() as session:
-        existing_count = len((await session.execute(select(Question.id))).all())
-        if existing_count >= 30:
-            return
+        existing_texts = set((await session.execute(select(Question.text))).scalars().all())
 
         for item in question_bank():
+            if item.text in existing_texts:
+                continue
             question = Question(
                 text=item.text,
                 question_type="multiple_choice",

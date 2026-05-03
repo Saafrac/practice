@@ -45,6 +45,12 @@ export async function startAdaptive(token: string): Promise<StartDiagnosticRespo
   });
 }
 
+export async function startFinal(token: string): Promise<StartDiagnosticResponse> {
+  return authedRequest<StartDiagnosticResponse>(token, "/tests/final/start", {
+    method: "POST",
+  });
+}
+
 export async function fetchNextQuestion(
   token: string,
   attemptId: number,

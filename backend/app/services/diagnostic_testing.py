@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -30,6 +31,8 @@ from app.services.adaptive_engine import ADAPTIVE_QUESTION_LIMIT, choose_next_ad
 
 THETA_STEP_DIAGNOSTIC = Decimal("0.20")
 DIAGNOSTIC_QUESTION_LIMIT = 12
+FINAL_QUESTION_LIMIT = 10
+FINAL_TOPIC_ORDER = ("grammar", "vocabulary", "reading", "listening")
 
 
 @dataclass(frozen=True)
@@ -66,6 +69,22 @@ def classify_level(score_percent: Decimal) -> str:
     if score_percent < Decimal("75"):
         return "Pre-Intermediate"
     return "Intermediate"
+
+
+def map_score_to_cefr(score_percent: Decimal) -> str:
+    if score_percent < Decimal("40"):
+        return "A1"
+    if score_percent < Decimal("55"):
+        return "A2"
+    if score_percent < Decimal("75"):
+        return "B1"
+    return "B2"
+
+
+def calculate_theta_from_score(score_percent: Decimal) -> Decimal:
+    # Map 0..100 into the same -2..+2 theta range used by the adaptive engine.
+    theta = (score_percent / Decimal("100") * Decimal("4")) - Decimal("2")
+    return max(min(theta, Decimal("2.00")), Decimal("-2.00")).quantize(Decimal("0.01"))
 
 
 def build_topic_recommendation(topic: str) -> str:
@@ -266,6 +285,8 @@ def build_insight(score_percent: Decimal, weak_topics: list[str]) -> str:
 def get_question_limit(test_type: TestType) -> int:
     if test_type == TestType.ADAPTIVE:
         return ADAPTIVE_QUESTION_LIMIT
+    if test_type == TestType.FINAL:
+        return FINAL_QUESTION_LIMIT
     return DIAGNOSTIC_QUESTION_LIMIT
 
 
@@ -354,6 +375,54 @@ async def load_diagnostic_pool(session: AsyncSession) -> list[Question]:
     return selected
 
 
+async def load_final_pool(session: AsyncSession, attempt_id: int) -> list[Question]:
+    rows = (
+        await session.execute(
+            select(Question).options(selectinload(Question.options)).order_by(Question.id.asc())
+        )
+    ).scalars().all()
+
+    if len(rows) < FINAL_QUESTION_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Question bank is not seeded enough for final flow.",
+        )
+
+    rng = random.Random(attempt_id)
+    by_topic: dict[str, list[Question]] = {}
+    fallback: list[Question] = []
+    for question in rows:
+        by_topic.setdefault(question.topic, []).append(question)
+        fallback.append(question)
+
+    for bucket in by_topic.values():
+        rng.shuffle(bucket)
+    rng.shuffle(fallback)
+
+    selected: list[Question] = []
+    selected_ids: set[int] = set()
+    topic_index = 0
+    while len(selected) < FINAL_QUESTION_LIMIT and any(by_topic.get(topic) for topic in FINAL_TOPIC_ORDER):
+        topic = FINAL_TOPIC_ORDER[topic_index % len(FINAL_TOPIC_ORDER)]
+        bucket = by_topic.get(topic, [])
+        while bucket:
+            candidate = bucket.pop(0)
+            if candidate.id not in selected_ids:
+                selected.append(candidate)
+                selected_ids.add(candidate.id)
+                break
+        topic_index += 1
+
+    for candidate in fallback:
+        if len(selected) >= FINAL_QUESTION_LIMIT:
+            break
+        if candidate.id not in selected_ids:
+            selected.append(candidate)
+            selected_ids.add(candidate.id)
+
+    return selected
+
+
 async def get_next_question_for_attempt(
     session: AsyncSession,
     attempt: TestAttempt,
@@ -366,6 +435,10 @@ async def get_next_question_for_attempt(
     if attempt.test.type == TestType.ADAPTIVE:
         theta = await get_last_theta(session, attempt.id)
         return await choose_next_adaptive_question(session, attempt.id, theta, answered_question_ids)
+
+    if attempt.test.type == TestType.FINAL:
+        pool = await load_final_pool(session, attempt.id)
+        return next((item for item in pool if item.id not in answered_question_ids), None)
 
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported test type.")
 
@@ -403,6 +476,8 @@ async def submit_test_answer(
     theta_before = await get_last_theta(session, attempt.id)
     if attempt.test.type == TestType.ADAPTIVE:
         theta_after = update_theta_adaptive(theta_before, question.difficulty, option.is_correct)
+    elif attempt.test.type == TestType.FINAL:
+        theta_after = theta_before
     else:
         delta = THETA_STEP_DIAGNOSTIC if option.is_correct else -THETA_STEP_DIAGNOSTIC
         theta_after = (theta_before + delta).quantize(Decimal("0.01"))
@@ -438,7 +513,10 @@ async def finalize_attempt_if_needed(session: AsyncSession, attempt: TestAttempt
     correct_answers = sum(1 for answer in answers if answer.is_correct)
     score_percent = (Decimal(correct_answers) / Decimal(total_questions) * Decimal("100")).quantize(Decimal("0.01"))
     level_result = classify_level(score_percent)
-    theta_final = Decimal(answers[-1].theta_after or Decimal("0.00")).quantize(Decimal("0.01"))
+    if attempt.test.type == TestType.FINAL:
+        theta_final = calculate_theta_from_score(score_percent)
+    else:
+        theta_final = Decimal(answers[-1].theta_after or Decimal("0.00")).quantize(Decimal("0.01"))
 
     attempt.finished_at = datetime.now(timezone.utc)
     attempt.score_percent = score_percent

@@ -34,9 +34,24 @@ export function StudentHomeScreen() {
         <ProgressBar label="Grammar confidence" value={58} />
       </AppCard>
 
-      <AppCard title="Quick actions">
-        <PrimaryButton title="Start diagnostic test" onPress={() => navigation.navigate("DiagnosticTest")} />
-        <PrimaryButton title="Start adaptive test" onPress={() => navigation.navigate("AdaptiveTest")} variant="ghost" />
+      <AppCard title="Knowledge control" subtitle="Three required assessment modes are available for demonstration.">
+        <View style={styles.controlList}>
+          <View style={styles.controlItem}>
+            <Text style={styles.controlTitle}>Diagnostic control</Text>
+            <Text style={styles.controlText}>Initial placement before practice begins.</Text>
+            <PrimaryButton title="Start Diagnostic Test" onPress={() => navigation.navigate("DiagnosticTest")} />
+          </View>
+          <View style={styles.controlItem}>
+            <Text style={styles.controlTitle}>Adaptive control</Text>
+            <Text style={styles.controlText}>Current learning check with theta-based question selection.</Text>
+            <PrimaryButton title="Start Adaptive Test" onPress={() => navigation.navigate("AdaptiveTest")} variant="ghost" />
+          </View>
+          <View style={styles.controlItem}>
+            <Text style={styles.controlTitle}>Final control</Text>
+            <Text style={styles.controlText}>Final assessment of your English level.</Text>
+            <PrimaryButton title="Start Final Test" onPress={() => navigation.navigate("FinalTest")} variant="ghost" />
+          </View>
+        </View>
         <PrimaryButton title="Open history" onPress={() => navigation.navigate("History")} variant="ghost" />
       </AppCard>
 
@@ -88,6 +103,28 @@ const styles = StyleSheet.create({
   statRow: {
     flexDirection: "row",
     gap: 10,
+  },
+  controlList: {
+    gap: 10,
+  },
+  controlItem: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    backgroundColor: "#F9FAFF",
+    padding: 12,
+    gap: 8,
+  },
+  controlTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  controlText: {
+    color: colors.mutedText,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
   },
   footerHint: {
     flexDirection: "row",

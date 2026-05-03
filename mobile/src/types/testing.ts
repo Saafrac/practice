@@ -65,13 +65,19 @@ export type RecommendationCardItem = {
 
 export type AttemptResultResponse = {
   attempt_id: number;
+  test_type: TestType;
   started_at: string;
   finished_at: string;
   score_percent: number;
   level_result: string;
+  cefr: string;
   theta_final: number;
   total_questions: number;
   correct_answers: number;
+  previous_score_percent: number | null;
+  score_delta: number | null;
+  previous_theta_final: number | null;
+  theta_delta: number | null;
   insight: string;
   weak_topics: string[];
   recommendations: string[];

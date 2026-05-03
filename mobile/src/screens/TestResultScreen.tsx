@@ -82,6 +82,24 @@ function formatTopic(topic: string) {
     .join(" ");
 }
 
+function formatTestType(testType: string) {
+  if (testType === "final") {
+    return "Final";
+  }
+  if (testType === "adaptive") {
+    return "Adaptive";
+  }
+  return "Diagnostic";
+}
+
+function formatDelta(value: number | null, suffix = "") {
+  if (value === null) {
+    return "No previous attempt";
+  }
+  const rounded = suffix === "%" ? Math.round(value) : Number(value.toFixed(2));
+  return `${value > 0 ? "+" : ""}${rounded}${suffix}`;
+}
+
 function buildErrorProfile(errorProfile?: ErrorProfileItem[]): ErrorProfileDisplayItem[] {
   if (!errorProfile || errorProfile.length === 0) {
     return defaultErrorProfile;
@@ -255,6 +273,9 @@ export function TestResultScreen() {
 
   const scorePercent = Math.round(result.score_percent);
   const levelBand = getLevelBand(result.score_percent);
+  const resultCefr = result.cefr || levelBand.cefr;
+  const testTypeLabel = formatTestType(result.test_type);
+  const isFinalResult = result.test_type === "final";
   const errorProfile = buildErrorProfile(result.error_profile);
   const weakestArea = findWeakestArea(errorProfile);
   const recommendationCards = buildRecommendationCards(result);
@@ -262,14 +283,26 @@ export function TestResultScreen() {
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
       <View style={styles.header}>
-        <Text style={styles.kicker}>Test result</Text>
-        <Text style={styles.title}>{levelBand.cefr} | {result.level_result}</Text>
+        <Text style={styles.kicker}>Test result | {testTypeLabel}</Text>
+        <Text style={styles.title}>{resultCefr} | {result.level_result}</Text>
         <Text style={styles.subtitle}>
-          Your attempt has been converted into a clear placement summary for the next practice step.
+          {isFinalResult
+            ? "Final certification result with score, CEFR, theta, and comparison to previous attempts."
+            : "Your attempt has been converted into a clear placement summary for the next practice step."}
         </Text>
       </View>
 
-      <AppCard title="Score summary" subtitle={levelBand.label} delay={30}>
+      {isFinalResult ? (
+        <AppCard title="Final certification result" subtitle="Итоговый контроль уровня знаний" delay={20}>
+          <View style={styles.finalCefrBox}>
+            <Text style={styles.finalCefrLabel}>CEFR level</Text>
+            <Text style={styles.finalCefrValue}>{resultCefr}</Text>
+            <Text style={styles.finalCefrMeta}>{result.level_result}</Text>
+          </View>
+        </AppCard>
+      ) : null}
+
+      <AppCard title="Score summary" subtitle={`${levelBand.label} | Test Type: ${testTypeLabel}`} delay={30}>
         <View style={[styles.scoreCard, levelBand.tone === "success" && styles.scoreCardSuccess]}>
           <View style={styles.scoreMain}>
             <Text style={styles.scoreLabel}>Final score</Text>
@@ -277,7 +310,7 @@ export function TestResultScreen() {
           </View>
           <View style={styles.cefrBadge}>
             <Text style={styles.cefrLabel}>CEFR-like</Text>
-            <Text style={styles.cefrValue}>{levelBand.cefr}</Text>
+            <Text style={styles.cefrValue}>{resultCefr}</Text>
           </View>
         </View>
         <View style={styles.nextLevelBox}>
@@ -291,8 +324,23 @@ export function TestResultScreen() {
         <StatBox label="Correct" value={`${result.correct_answers}/${result.total_questions}`} tone="success" />
       </View>
 
+      <AppCard title="Previous attempt comparison" delay={50}>
+        <View style={styles.statRow}>
+          <StatBox label="Score delta" value={formatDelta(result.score_delta, "%")} tone={result.score_delta && result.score_delta > 0 ? "success" : "default"} />
+          <StatBox label="Theta delta" value={formatDelta(result.theta_delta)} tone={result.theta_delta && result.theta_delta > 0 ? "success" : "default"} />
+        </View>
+        {result.previous_score_percent !== null ? (
+          <Text style={styles.summaryLine}>
+            Previous result: {Math.round(result.previous_score_percent)}% | theta {result.previous_theta_final?.toFixed(2) ?? "-"}
+          </Text>
+        ) : (
+          <Text style={styles.summaryText}>This is the first saved attempt, so comparison will appear after one more completed test.</Text>
+        )}
+      </AppCard>
+
       <AppCard title="Summary" delay={60}>
-        <Text style={styles.summaryLine}>Mapped level: {levelBand.cefr} - {levelBand.label}</Text>
+        <Text style={styles.summaryLine}>Test Type: {testTypeLabel}</Text>
+        <Text style={styles.summaryLine}>Mapped level: {resultCefr} - {levelBand.label}</Text>
         <Text style={styles.summaryLine}>Started: {new Date(result.started_at).toLocaleString()}</Text>
         <Text style={styles.summaryLine}>Finished: {new Date(result.finished_at).toLocaleString()}</Text>
         <Text style={styles.summaryLine}>Attempt ID: #{result.attempt_id}</Text>
@@ -436,6 +484,31 @@ const styles = StyleSheet.create({
   statRow: {
     flexDirection: "row",
     gap: 10,
+  },
+  finalCefrBox: {
+    alignItems: "center",
+    backgroundColor: "#0F2F24",
+    borderColor: "#2B7A5B",
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: 4,
+    padding: 20,
+  },
+  finalCefrLabel: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  finalCefrValue: {
+    color: "#FFFFFF",
+    fontSize: 64,
+    fontWeight: "900",
+  },
+  finalCefrMeta: {
+    color: "rgba(255,255,255,0.86)",
+    fontSize: 16,
+    fontWeight: "800",
   },
   scoreCard: {
     alignItems: "center",

@@ -46,6 +46,15 @@ class AdminQuestionsResponse(BaseModel):
     questions: list[AdminQuestionItem]
 
 
+class AdminSystemStatusResponse(BaseModel):
+    api_status: str
+    database_status: str
+    users_count: int
+    questions_count: int
+    active_tests_count: int
+    last_seed_update: datetime | None
+
+
 class AdminQuestionUpsertRequest(BaseModel):
     text: str = Field(min_length=5, max_length=4000)
     difficulty: int = Field(ge=-2, le=2)

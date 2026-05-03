@@ -5,6 +5,7 @@ import {
   createAdminQuestion,
   deleteAdminQuestion,
   fetchAdminQuestions,
+  fetchAdminSystemStatus,
   fetchAdminUsers,
   updateAdminQuestion,
   updateAdminUserRole,
@@ -15,7 +16,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { SkeletonBlock } from "../components/SkeletonBlock";
 import { StatBox } from "../components/StatBox";
 import { useAuthStore } from "../store/authStore";
-import { AdminQuestionItem, AdminRole, AdminUserItem } from "../types/admin";
+import { AdminQuestionItem, AdminRole, AdminSystemStatusResponse, AdminUserItem } from "../types/admin";
 import { colors } from "../theme/colors";
 
 const roleCycle: AdminRole[] = ["student", "teacher", "admin"];
@@ -60,6 +61,17 @@ function normalizeTopic(topic: string) {
   return topic.trim().toLowerCase();
 }
 
+function formatStatusDate(value: string | null | undefined) {
+  if (!value) {
+    return "Not seeded";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+  return date.toLocaleString();
+}
+
 function questionToForm(question: AdminQuestionItem): QuestionFormState {
   const correctIndex = Math.max(0, question.options.findIndex((option) => option.is_correct));
   return {
@@ -77,6 +89,7 @@ export function AdminDashboardScreen() {
 
   const [users, setUsers] = useState<AdminUserItem[]>([]);
   const [questions, setQuestions] = useState<AdminQuestionItem[]>([]);
+  const [systemStatus, setSystemStatus] = useState<AdminSystemStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +102,26 @@ export function AdminDashboardScreen() {
 
   const usersCount = users.length;
   const questionsCount = questions.length;
+  const activeTestsCount = systemStatus?.active_tests_count ?? 0;
+  const latestLocalUpdate = useMemo(() => {
+    const timestamps = [...users.map((user) => user.created_at), ...questions.map((question) => question.created_at)]
+      .map((value) => new Date(value))
+      .filter((date) => !Number.isNaN(date.getTime()));
+    if (timestamps.length === 0) {
+      return null;
+    }
+    return new Date(Math.max(...timestamps.map((date) => date.getTime()))).toISOString();
+  }, [questions, users]);
+  const lastSeedUpdate = useMemo(() => {
+    const timestamps = [systemStatus?.last_seed_update, latestLocalUpdate]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => new Date(value))
+      .filter((date) => !Number.isNaN(date.getTime()));
+    if (timestamps.length === 0) {
+      return null;
+    }
+    return new Date(Math.max(...timestamps.map((date) => date.getTime()))).toISOString();
+  }, [latestLocalUpdate, systemStatus?.last_seed_update]);
 
   const topicChips = useMemo(() => {
     const topics = Array.from(new Set(questions.map((question) => normalizeTopic(question.topic)).filter(Boolean)));
@@ -124,12 +157,14 @@ export function AdminDashboardScreen() {
 
     setError(null);
     try {
-      const [usersResponse, questionsResponse] = await Promise.all([
+      const [usersResponse, questionsResponse, statusResponse] = await Promise.all([
         fetchAdminUsers(token),
         fetchAdminQuestions(token),
+        fetchAdminSystemStatus(token),
       ]);
       setUsers(usersResponse.users);
       setQuestions(questionsResponse.questions);
+      setSystemStatus(statusResponse);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Failed to load admin data.");
     } finally {
@@ -313,6 +348,39 @@ export function AdminDashboardScreen() {
           />
         </AppCard>
       ) : null}
+
+      <AppCard
+        title="System status"
+        subtitle="Администратор видит базовое состояние системы и готовность банка заданий."
+        delay={50}
+      >
+        <View style={styles.systemGrid}>
+          <View style={styles.systemTile}>
+            <Text style={styles.systemLabel}>API status</Text>
+            <Text style={styles.systemValue}>{systemStatus?.api_status ?? "online"}</Text>
+          </View>
+          <View style={styles.systemTile}>
+            <Text style={styles.systemLabel}>DB status</Text>
+            <Text style={styles.systemValue}>{systemStatus?.database_status ?? "online"}</Text>
+          </View>
+          <View style={styles.systemTile}>
+            <Text style={styles.systemLabel}>Active users</Text>
+            <Text style={styles.systemValue}>{usersCount}</Text>
+          </View>
+          <View style={styles.systemTile}>
+            <Text style={styles.systemLabel}>Question bank</Text>
+            <Text style={styles.systemValue}>{questionsCount}</Text>
+          </View>
+          <View style={styles.systemTile}>
+            <Text style={styles.systemLabel}>Active tests</Text>
+            <Text style={styles.systemValue}>{activeTestsCount}</Text>
+          </View>
+          <View style={[styles.systemTile, styles.systemTileWide]}>
+            <Text style={styles.systemLabel}>Last seed/update</Text>
+            <Text style={styles.systemValueSmall}>{formatStatusDate(lastSeedUpdate)}</Text>
+          </View>
+        </View>
+      </AppCard>
 
       <AppCard title="User role management" subtitle="Tap rotate to switch role: student -> teacher -> admin" delay={70}>
         {users.length > 0 ? (
@@ -566,6 +634,41 @@ const styles = StyleSheet.create({
   statRow: {
     flexDirection: "row",
     gap: 10,
+  },
+  systemGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  systemTile: {
+    flexGrow: 1,
+    minWidth: 124,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    backgroundColor: "#F9FAFF",
+    padding: 12,
+    gap: 5,
+  },
+  systemTileWide: {
+    minWidth: 220,
+  },
+  systemLabel: {
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  systemValue: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "900",
+    textTransform: "capitalize",
+  },
+  systemValueSmall: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "800",
   },
   difficultyGrid: {
     flexDirection: "row",
