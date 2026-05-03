@@ -1,4 +1,4 @@
-﻿import { useNavigation } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -11,7 +11,7 @@ import { SkeletonBlock } from "../components/SkeletonBlock";
 import { StatBox } from "../components/StatBox";
 import { RootStackParamList } from "../navigation/types";
 import { useAuthStore } from "../store/authStore";
-import { StudentHistoryResponse } from "../types/student";
+import { StudentHistoryItem, StudentHistoryResponse } from "../types/student";
 import { colors } from "../theme/colors";
 
 type Navigation = NativeStackNavigationProp<RootStackParamList>;
@@ -24,6 +24,106 @@ function trendLabel(trend: "up" | "down" | "stable") {
     return "Needs focus";
   }
   return "Stable";
+}
+
+function getCefrLevel(scorePercent: number) {
+  if (scorePercent < 40) {
+    return "A1";
+  }
+  if (scorePercent < 55) {
+    return "A2";
+  }
+  if (scorePercent < 75) {
+    return "B1";
+  }
+  if (scorePercent < 90) {
+    return "B2";
+  }
+  return "C1";
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value)}%`;
+}
+
+function formatTheta(value: number) {
+  return value.toFixed(2);
+}
+
+function formatScoreDelta(value: number | null) {
+  if (value === null) {
+    return "-";
+  }
+  const rounded = Math.round(value);
+  return `${rounded > 0 ? "+" : ""}${rounded}%`;
+}
+
+function formatThetaDelta(value: number | null) {
+  if (value === null) {
+    return "-";
+  }
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
+function deltaTone(value: number | null): "default" | "success" | "warning" {
+  if (value === null || Math.abs(value) < 0.01) {
+    return "default";
+  }
+  return value > 0 ? "success" : "warning";
+}
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function normalizeTheta(value: number) {
+  return clampPercent(((value + 2) / 4) * 100);
+}
+
+type TrendChartProps = {
+  items: StudentHistoryItem[];
+  mode: "score" | "theta";
+};
+
+function TrendChart({ items, mode }: TrendChartProps) {
+  const isScore = mode === "score";
+
+  return (
+    <View style={styles.trendChart}>
+      <View style={styles.chartGrid}>
+        <View style={styles.gridLine} />
+        <View style={styles.gridLine} />
+        <View style={styles.gridLine} />
+      </View>
+
+      <View style={styles.trendColumns}>
+        {items.map((item) => {
+          const rawValue = isScore ? item.score_percent : item.theta_final;
+          const normalized = isScore ? clampPercent(rawValue) : normalizeTheta(rawValue);
+          const pointBottom = Math.max(7, Math.min(89, normalized));
+
+          return (
+            <View key={`${mode}-${item.attempt_id}`} style={styles.trendColumn}>
+              <View style={styles.pointArea}>
+                <View style={[styles.pointStem, { height: `${pointBottom}%` }]} />
+                <View
+                  style={[
+                    styles.trendPoint,
+                    { bottom: `${pointBottom}%` },
+                    !isScore && styles.thetaPoint,
+                  ]}
+                />
+              </View>
+              <Text style={styles.trendValue}>
+                {isScore ? formatPercent(rawValue) : formatTheta(rawValue)}
+              </Text>
+              <Text style={styles.trendAttempt}>#{item.attempt_id}</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
 }
 
 export function HistoryScreen() {
@@ -69,7 +169,14 @@ export function HistoryScreen() {
     };
   }, [token]);
 
-  const chartItems = useMemo(() => payload?.attempts.slice(0, 8).reverse() ?? [], [payload]);
+  const recentTrendItems = useMemo(() => payload?.attempts.slice(0, 8).reverse() ?? [], [payload]);
+  const latestAttempts = useMemo(() => payload?.attempts.slice(0, 5) ?? [], [payload]);
+  const latestAttempt = payload?.attempts[0] ?? null;
+  const previousAttempt = payload?.attempts[1] ?? null;
+  const hasTrendData = recentTrendItems.length >= 2;
+  const scoreDelta = latestAttempt && previousAttempt ? latestAttempt.score_percent - previousAttempt.score_percent : null;
+  const thetaDelta = latestAttempt && previousAttempt ? latestAttempt.theta_final - previousAttempt.theta_final : null;
+  const latestCefr = latestAttempt ? getCefrLevel(latestAttempt.score_percent) : "-";
 
   if (isLoading) {
     return (
@@ -84,9 +191,8 @@ export function HistoryScreen() {
           <SkeletonBlock height={44} />
         </AppCard>
         <AppCard title="Loading trend" animated={false}>
-          <SkeletonBlock height={14} />
+          <SkeletonBlock height={124} />
           <SkeletonBlock height={14} width="92%" />
-          <SkeletonBlock height={14} width="84%" />
           <SkeletonBlock height={14} width="74%" />
         </AppCard>
         <AppCard title="Loading attempts" animated={false}>
@@ -115,56 +221,96 @@ export function HistoryScreen() {
       <View style={styles.header}>
         <Text style={styles.kicker}>Student history</Text>
         <Text style={styles.title}>Track your progress</Text>
-        <Text style={styles.subtitle}>See every finished attempt and how your score changes over time.</Text>
+        <Text style={styles.subtitle}>See finished attempts, score growth, theta movement, and level changes over time.</Text>
       </View>
 
       <View style={styles.statRow}>
         <StatBox label="Attempts" value={`${summary?.total_attempts ?? 0}`} />
-        <StatBox label="Avg score" value={`${Math.round(summary?.average_score ?? 0)}%`} tone="success" />
+        <StatBox label="Latest level" value={latestCefr} tone={latestAttempt ? "success" : "default"} />
       </View>
 
       <View style={styles.statRow}>
-        <StatBox label="Best score" value={`${Math.round(summary?.best_score ?? 0)}%`} />
-        <StatBox label="Trend" value={trendLabel(summary?.trend ?? "stable")} tone="default" />
+        <StatBox label="Avg score" value={formatPercent(summary?.average_score ?? 0)} tone="success" />
+        <StatBox label="Best score" value={formatPercent(summary?.best_score ?? 0)} />
       </View>
 
-      <AppCard title="Score trend" subtitle="Recent attempts">
-        {chartItems.length > 0 ? (
-          <View style={styles.chartWrap}>
-            {chartItems.map((item) => (
-              <View key={item.attempt_id} style={styles.chartRow}>
-                <Text style={styles.chartLabel}>#{item.attempt_id}</Text>
-                <View style={styles.chartTrack}>
-                  <View style={[styles.chartFill, { width: `${Math.max(4, Math.round(item.score_percent))}%` }]} />
-                </View>
-                <Text style={styles.chartValue}>{Math.round(item.score_percent)}%</Text>
-              </View>
-            ))}
+      <View style={styles.statRow}>
+        <StatBox label="Score trend" value={formatScoreDelta(scoreDelta)} tone={deltaTone(scoreDelta)} />
+        <StatBox label="Theta trend" value={formatThetaDelta(thetaDelta)} tone={deltaTone(thetaDelta)} />
+      </View>
+
+      <AppCard
+        title="Progress overview"
+        subtitle={
+          hasTrendData
+            ? `${trendLabel(summary?.trend ?? "stable")} across recent attempts. Latest level: ${latestCefr}${latestAttempt ? ` / ${latestAttempt.level_result}` : ""}.`
+            : "Complete at least two attempts to unlock the score and theta trend."
+        }
+      >
+        {hasTrendData ? (
+          <View style={styles.progressWrap}>
+            <View style={styles.chartHeader}>
+              <Text style={styles.sectionLabel}>Score timeline</Text>
+              <Text style={styles.sectionMeta}>last {recentTrendItems.length}</Text>
+            </View>
+            <TrendChart items={recentTrendItems} mode="score" />
+
+            <View style={styles.chartHeader}>
+              <Text style={styles.sectionLabel}>Theta trend</Text>
+              <Text style={styles.sectionMeta}>-2.00 to +2.00</Text>
+            </View>
+            <TrendChart items={recentTrendItems} mode="theta" />
           </View>
         ) : (
-          <EmptyState
-            title="No finished attempts yet"
-            description="Complete a diagnostic or adaptive test to populate history."
-            icon="bar-chart-outline"
-          />
+          <View style={styles.emptyProgress}>
+            <EmptyState
+              title={latestAttempt ? "One more attempt will reveal your trend" : "No finished attempts yet"}
+              description={
+                latestAttempt
+                  ? "Your first result is saved. Finish one adaptive test to compare score, theta, and level movement."
+                  : "Start an adaptive test so the app can build a progress timeline for defense."
+              }
+              icon="analytics-outline"
+            />
+            <PrimaryButton title="Start adaptive test" onPress={() => navigation.navigate("AdaptiveTest")} />
+          </View>
         )}
       </AppCard>
 
-      <AppCard title="Attempts list">
-        {payload && payload.attempts.length > 0 ? (
+      {hasTrendData ? (
+        <AppCard title="Level timeline" subtitle="CEFR-like bands from recent attempts">
+          <View style={styles.levelTimeline}>
+            {recentTrendItems.map((item, index) => (
+              <View key={`level-${item.attempt_id}`} style={styles.levelStep}>
+                {index > 0 ? <View style={styles.levelConnector} /> : null}
+                <View style={styles.levelBadge}>
+                  <Text style={styles.levelBadgeText}>{getCefrLevel(item.score_percent)}</Text>
+                </View>
+                <Text style={styles.levelAttempt}>#{item.attempt_id}</Text>
+                <Text style={styles.levelScore}>{formatPercent(item.score_percent)}</Text>
+              </View>
+            ))}
+          </View>
+        </AppCard>
+      ) : null}
+
+      <AppCard title="Last 5 attempts">
+        {latestAttempts.length > 0 ? (
           <View style={styles.listWrap}>
-            {payload.attempts.map((attempt) => (
+            {latestAttempts.map((attempt) => (
               <Pressable
                 key={attempt.attempt_id}
                 style={styles.attemptCard}
                 onPress={() => navigation.navigate("TestResult", { attemptId: attempt.attempt_id })}
               >
                 <View style={styles.attemptTop}>
-                  <Text style={styles.attemptTitle}>#{attempt.attempt_id} • {attempt.test_type}</Text>
-                  <Text style={styles.attemptScore}>{Math.round(attempt.score_percent)}%</Text>
+                  <Text style={styles.attemptTitle}>#{attempt.attempt_id} | {attempt.test_type}</Text>
+                  <Text style={styles.attemptScore}>{formatPercent(attempt.score_percent)}</Text>
                 </View>
                 <Text style={styles.attemptMeta}>{new Date(attempt.finished_at).toLocaleString()}</Text>
-                <Text style={styles.attemptMeta}>Level: {attempt.level_result} | Theta: {attempt.theta_final.toFixed(2)}</Text>
+                <Text style={styles.attemptMeta}>
+                  Level: {getCefrLevel(attempt.score_percent)} / {attempt.level_result} | Theta: {formatTheta(attempt.theta_final)}
+                </Text>
               </Pressable>
             ))}
           </View>
@@ -219,38 +365,143 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
   },
-  chartWrap: {
-    gap: 8,
+  progressWrap: {
+    gap: 14,
   },
-  chartRow: {
+  chartHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    justifyContent: "space-between",
   },
-  chartLabel: {
-    width: 40,
+  sectionLabel: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  sectionMeta: {
     color: colors.mutedText,
     fontSize: 12,
     fontWeight: "700",
+    textTransform: "uppercase",
   },
-  chartTrack: {
-    flex: 1,
-    height: 12,
-    backgroundColor: "#E8EDFF",
-    borderRadius: 6,
+  trendChart: {
+    height: 154,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    backgroundColor: "#F9FAFF",
+    paddingHorizontal: 8,
+    paddingTop: 10,
+    paddingBottom: 8,
     overflow: "hidden",
   },
-  chartFill: {
-    height: 12,
-    backgroundColor: colors.primary,
-    borderRadius: 6,
+  chartGrid: {
+    ...StyleSheet.absoluteFillObject,
+    paddingHorizontal: 8,
+    paddingTop: 28,
+    paddingBottom: 42,
+    justifyContent: "space-between",
   },
-  chartValue: {
-    width: 40,
-    textAlign: "right",
+  gridLine: {
+    height: 1,
+    backgroundColor: "#E2E8FF",
+  },
+  trendColumns: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 6,
+  },
+  trendColumn: {
+    flex: 1,
+    alignItems: "center",
+    minWidth: 34,
+  },
+  pointArea: {
+    flex: 1,
+    width: "100%",
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  pointStem: {
+    width: 2,
+    minHeight: 8,
+    borderRadius: 999,
+    backgroundColor: "#C9D3FF",
+  },
+  trendPoint: {
+    position: "absolute",
+    width: 12,
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.surface,
+  },
+  thetaPoint: {
+    backgroundColor: colors.success,
+  },
+  trendValue: {
     color: colors.text,
-    fontSize: 12,
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 6,
+  },
+  trendAttempt: {
+    color: colors.mutedText,
+    fontSize: 10,
     fontWeight: "700",
+    marginTop: 2,
+  },
+  emptyProgress: {
+    gap: 12,
+  },
+  levelTimeline: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 4,
+    paddingTop: 4,
+  },
+  levelStep: {
+    flex: 1,
+    alignItems: "center",
+    position: "relative",
+    minWidth: 44,
+  },
+  levelConnector: {
+    position: "absolute",
+    top: 17,
+    right: "50%",
+    width: "100%",
+    height: 2,
+    backgroundColor: "#CCD6FF",
+  },
+  levelBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 999,
+    backgroundColor: "#EEF1FF",
+    borderWidth: 1,
+    borderColor: "#C7D0FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  levelBadgeText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  levelAttempt: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 6,
+  },
+  levelScore: {
+    color: colors.mutedText,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 2,
   },
   listWrap: {
     gap: 10,
@@ -267,8 +518,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 10,
   },
   attemptTitle: {
+    flex: 1,
     color: colors.text,
     fontSize: 14,
     fontWeight: "700",
@@ -282,5 +535,6 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     fontSize: 12,
     fontWeight: "600",
+    lineHeight: 17,
   },
 });
