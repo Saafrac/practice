@@ -196,6 +196,7 @@ async def attempt_result(attempt_id: int, current_user: User = Depends(get_curre
                 suggested_activity=item.suggested_activity,
                 estimated_time=item.estimated_time,
                 priority=item.priority,
+                source=item.source,
             )
             for item in feedback.recommendation_cards
         ],

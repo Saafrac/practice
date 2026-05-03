@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 from fastapi import HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.db.models import (
     Answer,
     ErrorProfile,
@@ -42,6 +47,7 @@ class RecommendationCardSnapshot:
     suggested_activity: str
     estimated_time: str
     priority: str
+    source: str = "Rule-based"
 
 
 @dataclass(frozen=True)
@@ -123,6 +129,126 @@ def build_ai_recommendation_card(
         estimated_time=estimated_time,
         priority=priority,
     )
+
+
+def _extract_json_array(text: str) -> list[dict[str, str]]:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`").strip()
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:].strip()
+
+    start = cleaned.find("[")
+    end = cleaned.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("Gemini response did not contain a JSON array.")
+
+    parsed = json.loads(cleaned[start : end + 1])
+    if not isinstance(parsed, list):
+        raise ValueError("Gemini response JSON is not a list.")
+
+    return [item for item in parsed if isinstance(item, dict)]
+
+
+def _normalize_priority(priority: object) -> str:
+    if isinstance(priority, str) and priority.strip().lower() in {"high", "medium", "low"}:
+        return priority.strip().title()
+    return "Medium"
+
+
+def _safe_text(value: object, fallback: str, max_length: int = 260) -> str:
+    if not isinstance(value, str):
+        return fallback
+    text = " ".join(value.split())
+    if not text:
+        return fallback
+    return text[:max_length].rstrip()
+
+
+def _request_gemini_recommendations(prompt: str, api_key: str, model: str, timeout_seconds: int) -> str:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.35,
+            "responseMimeType": "application/json",
+        },
+    }
+    request = urllib_request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        },
+        method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=timeout_seconds) as response:
+        response_payload = json.loads(response.read().decode("utf-8"))
+
+    return response_payload["candidates"][0]["content"]["parts"][0]["text"]
+
+
+async def maybe_enhance_recommendation_cards_with_llm(
+    score_percent: Decimal,
+    weak_topics: list[str],
+    topic_stats: dict[str, dict[str, int]],
+    recommendation_cards: list[RecommendationCardSnapshot],
+) -> list[RecommendationCardSnapshot]:
+    settings = get_settings()
+    if not settings.gemini_api_key or not recommendation_cards:
+        return recommendation_cards
+
+    baseline_cards = [
+        {
+            "category": card.category,
+            "priority": card.priority,
+            "reason": card.reason,
+            "suggested_activity": card.suggested_activity,
+            "estimated_time": card.estimated_time,
+            "stats": topic_stats.get(card.category, {"total": 0, "wrong": 0}),
+        }
+        for card in recommendation_cards
+    ]
+    prompt = (
+        "You are an English-learning recommendation module inside a diagnostic testing app. "
+        "Improve these recommendation cards using the student's score and error profile. "
+        "Return ONLY a JSON array with the same number of items and these fields: "
+        "category, priority, reason, suggested_activity, estimated_time. "
+        "Use short, concrete learning actions. Keep priority as High, Medium, or Low. "
+        "Do not mention that you are an AI model.\n\n"
+        f"Score percent: {score_percent}\n"
+        f"Weak topics: {weak_topics}\n"
+        f"Baseline cards: {json.dumps(baseline_cards, ensure_ascii=False)}"
+    )
+
+    try:
+        response_text = await asyncio.to_thread(
+            _request_gemini_recommendations,
+            prompt,
+            settings.gemini_api_key,
+            settings.gemini_model,
+            settings.gemini_timeout_seconds,
+        )
+        llm_items = _extract_json_array(response_text)
+    except (KeyError, ValueError, json.JSONDecodeError, TimeoutError, urllib_error.URLError, urllib_error.HTTPError):
+        return recommendation_cards
+
+    enhanced_cards: list[RecommendationCardSnapshot] = []
+    for index, card in enumerate(recommendation_cards):
+        item = llm_items[index] if index < len(llm_items) else {}
+        enhanced_cards.append(
+            RecommendationCardSnapshot(
+                category=card.category,
+                priority=_normalize_priority(item.get("priority", card.priority)),
+                reason=_safe_text(item.get("reason"), card.reason),
+                suggested_activity=_safe_text(item.get("suggested_activity"), card.suggested_activity),
+                estimated_time=_safe_text(item.get("estimated_time"), card.estimated_time, max_length=32),
+                source="Gemini AI" if item else card.source,
+            )
+        )
+
+    return enhanced_cards
 
 
 def build_insight(score_percent: Decimal, weak_topics: list[str]) -> str:
@@ -448,8 +574,8 @@ async def rebuild_error_profile_and_recommendations(
             )
         )
 
-    insight = build_insight(score_percent, weak_topics)
     await session.commit()
+    insight = build_insight(score_percent, weak_topics)
     return AttemptFeedbackSnapshot(
         weak_topics=weak_topics,
         recommendations=recommendations,
@@ -499,6 +625,12 @@ async def get_attempt_feedback(session: AsyncSession, attempt_id: int, score_per
         )
         for category, text in recommendation_rows
     ]
+    recommendation_cards = await maybe_enhance_recommendation_cards_with_llm(
+        score_percent=score_percent,
+        weak_topics=list(weak_topics),
+        topic_stats=stats_by_topic,
+        recommendation_cards=recommendation_cards,
+    )
 
     return AttemptFeedbackSnapshot(
         weak_topics=list(weak_topics),

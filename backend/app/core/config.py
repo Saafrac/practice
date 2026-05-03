@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     jwt_secret_key: str = token_urlsafe(32)
     jwt_access_token_expire_minutes: int = 60 * 24
     database_url: str
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_timeout_seconds: int = 8
 
     model_config = SettingsConfigDict(
         env_file=".env",

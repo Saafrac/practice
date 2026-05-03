@@ -69,6 +69,7 @@ class RecommendationCardItem(BaseModel):
     suggested_activity: str
     estimated_time: str
     priority: str
+    source: str = "Rule-based"
 
 
 class AttemptResultResponse(BaseModel):

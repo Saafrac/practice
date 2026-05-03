@@ -1,7 +1,7 @@
 ﻿import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { fetchAttemptResult } from "../api/testingApi";
 import { AppCard } from "../components/AppCard";
@@ -157,6 +157,31 @@ function getPriorityStyle(priority: string) {
   return styles.priorityLow;
 }
 
+function buildRecommendationExplanation(result: AttemptResultResponse, recommendation: RecommendationCardItem) {
+  const topicLabel = formatTopic(recommendation.category);
+  const profileItem = result.error_profile?.find((item) => item.topic === recommendation.category);
+
+  if (profileItem && profileItem.total_questions > 0) {
+    return (
+      `Because you made ${profileItem.wrong_answers} mistake(s) in ${topicLabel} ` +
+      `with ${Math.round(profileItem.accuracy_percent)}% accuracy, the system recommends: ` +
+      recommendation.suggested_activity
+    );
+  }
+
+  if (result.weak_topics.includes(recommendation.category)) {
+    return (
+      `Because ${topicLabel} appears in your weak topics, the system selected an activity that targets this skill: ` +
+      recommendation.suggested_activity
+    );
+  }
+
+  return (
+    "Because no critical topic gap was detected, the system recommends a short maintenance activity: " +
+    recommendation.suggested_activity
+  );
+}
+
 export function TestResultScreen() {
   const route = useRoute<ResultRoute>();
   const navigation = useNavigation<Navigation>();
@@ -165,6 +190,7 @@ export function TestResultScreen() {
   const [result, setResult] = useState<AttemptResultResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandedRecommendations, setExpandedRecommendations] = useState<Record<string, boolean>>({});
 
   const loadResult = async () => {
     if (!token) {
@@ -312,27 +338,59 @@ export function TestResultScreen() {
           Based on the error profile, the system forms personalized recommendations for further learning.
         </Text>
         <View style={styles.recommendationList}>
-          {recommendationCards.map((recommendation, index) => (
-            <View key={`${recommendation.category}-${index}`} style={styles.recommendationItem}>
-              <View style={styles.recommendationHeader}>
-                <Text style={styles.recommendationCategory}>{formatTopic(recommendation.category)}</Text>
-                <View style={[styles.priorityBadge, getPriorityStyle(recommendation.priority)]}>
-                  <Text style={styles.priorityText}>{recommendation.priority}</Text>
+          {recommendationCards.map((recommendation, index) => {
+            const recommendationKey = `${recommendation.category}-${index}`;
+            const isExpanded = Boolean(expandedRecommendations[recommendationKey]);
+
+            return (
+              <View key={recommendationKey} style={styles.recommendationItem}>
+                <View style={styles.recommendationHeader}>
+                  <Text style={styles.recommendationCategory}>{formatTopic(recommendation.category)}</Text>
+                  <View style={styles.badgeRow}>
+                    <View style={styles.sourceBadge}>
+                      <Text style={styles.sourceText}>{recommendation.source ?? "Rule-based"}</Text>
+                    </View>
+                    <View style={[styles.priorityBadge, getPriorityStyle(recommendation.priority)]}>
+                      <Text style={styles.priorityText}>{recommendation.priority}</Text>
+                    </View>
+                  </View>
                 </View>
+                <Text style={styles.recommendationReason}>{recommendation.reason}</Text>
+                <View style={styles.activityRow}>
+                  <View style={styles.activityBlock}>
+                    <Text style={styles.activityLabel}>Suggested activity</Text>
+                    <Text style={styles.activityText}>{recommendation.suggested_activity}</Text>
+                  </View>
+                  <View style={styles.timePill}>
+                    <Text style={styles.timeLabel}>Time</Text>
+                    <Text style={styles.timeValue}>{recommendation.estimated_time}</Text>
+                  </View>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() =>
+                    setExpandedRecommendations((current) => ({
+                      ...current,
+                      [recommendationKey]: !isExpanded,
+                    }))
+                  }
+                  style={styles.whyButton}
+                >
+                  <Text style={styles.whyButtonText}>
+                    {isExpanded ? "Hide explanation" : "Why this recommendation?"}
+                  </Text>
+                </Pressable>
+                {isExpanded ? (
+                  <View style={styles.explanationBox}>
+                    <Text style={styles.explanationTitle}>Explanation</Text>
+                    <Text style={styles.explanationText}>
+                      {buildRecommendationExplanation(result, recommendation)}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
-              <Text style={styles.recommendationReason}>{recommendation.reason}</Text>
-              <View style={styles.activityRow}>
-                <View style={styles.activityBlock}>
-                  <Text style={styles.activityLabel}>Suggested activity</Text>
-                  <Text style={styles.activityText}>{recommendation.suggested_activity}</Text>
-                </View>
-                <View style={styles.timePill}>
-                  <Text style={styles.timeLabel}>Time</Text>
-                  <Text style={styles.timeValue}>{recommendation.estimated_time}</Text>
-                </View>
-              </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
         <PrimaryButton title="Back to dashboard" onPress={() => navigation.navigate("RoleTabs")} />
       </AppCard>
@@ -510,6 +568,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
+  badgeRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  sourceBadge: {
+    backgroundColor: "#EEF2FF",
+    borderColor: "#DDE5FF",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  sourceText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "900",
+  },
   priorityHigh: {
     backgroundColor: "#FDECEC",
   },
@@ -575,5 +652,37 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 14,
     fontWeight: "900",
+  },
+  whyButton: {
+    alignSelf: "flex-start",
+    borderColor: colors.border,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  whyButtonText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  explanationBox: {
+    backgroundColor: "#F7F9FF",
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 4,
+    padding: 12,
+  },
+  explanationTitle: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  explanationText: {
+    color: colors.mutedText,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
   },
 });

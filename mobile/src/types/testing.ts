@@ -60,6 +60,7 @@ export type RecommendationCardItem = {
   suggested_activity: string;
   estimated_time: string;
   priority: "High" | "Medium" | "Low" | string;
+  source?: string;
 };
 
 export type AttemptResultResponse = {
