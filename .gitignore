@@ -12,4 +12,3 @@ __pycache__/
 venv/
 backend/.env
 mobile/.env
-backend/alembic/versions/
